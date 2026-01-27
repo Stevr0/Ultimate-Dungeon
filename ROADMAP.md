@@ -1,11 +1,11 @@
 # ROADMAP.md — Ultimate Dungeon
 
-Version: 1.1  
+Version: 1.2  
 Last Updated: 2026-01-27  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
-Data: ScriptableObjects-first  
+Data: ScriptableObjects-first
 
 ---
 
@@ -13,13 +13,14 @@ Data: ScriptableObjects-first
 
 A **step-by-step, logical build order** for the first playable vertical slice of *Ultimate Dungeon*.
 
-Goal of the first slice:
+**Goal of the first slice:**
 - Host can start the game
 - Clients can join
 - Players spawn in a small “Crater Village” test area
 - Ultima Online–style click-to-move works
 - Targeting + interaction + visual feedback exists
-- Combat can be added without rewriting foundations
+- Player stats / vitals / skills are visible and authoritative
+- Combat can be added **without rewriting foundations**
 
 ---
 
@@ -33,7 +34,7 @@ Goal of the first slice:
 
 ---
 
-## Phase 1 — Multiplayer Foundation (CURRENT)
+## Phase 1 — Multiplayer Foundation (MOSTLY COMPLETE)
 
 ### Step 0 — Repo + Project Hygiene  
 **Status:** ✅ COMPLETED
@@ -59,7 +60,10 @@ Goal of the first slice:
 
 - Simple test scene in use
 - Flat ground + test objects
-- Will later be replaced by Crater Village prototype
+- Temporary lighting
+
+**Planned:**
+- Replace with Crater Village prototype scene
 
 ---
 
@@ -74,18 +78,25 @@ Implemented:
 
 Acceptance met:
 - Host + client connect
-- Both players visible
+- Players spawn correctly
 - Only local player accepts input
 
 ---
 
 ### Step 4 — Player Core Data Model (SO-first)  
-**Status:** ⏳ NOT STARTED
+**Status:** ✅ COMPLETED
 
-Planned:
-- `PlayerArchetypeDef`
-- `PlayerCore`
-- Baseline stats + vitals container
+Implemented:
+- `PlayerDefinition` (ScriptableObject)
+- `PlayerCore` (server initializer)
+- `PlayerStats` (STR / DEX / INT)
+- `PlayerVitals` (HP / Stam / Mana, 150 cap)
+- `PlayerSkillBook` (all skills present at start)
+
+Locked:
+- Stat → Vital derivation
+- Hard vital caps
+- Skill cap (700) + manual redistribution
 
 ---
 
@@ -109,7 +120,7 @@ Acceptance met:
 **Status:** ⚠️ PARTIAL
 
 Completed:
-- `LocalCameraBinder` (camera follows local player)
+- `LocalCameraBinder`
 
 Remaining:
 - CursorStack
@@ -136,17 +147,31 @@ Acceptance met:
 ---
 
 ### Step 8 — Visual Feedback (Targeting UI)  
-**Status:** ✅ COMPLETED (Targeting subset)
+**Status:** ✅ COMPLETED
 
 Implemented:
 - `TargetFrameUI`
 - `TargetIndicatorFollower`
 - Bounds-correct target ring placement
-- `TargetRingPulse` (visual feedback)
+- `TargetRingPulse`
 
-Remaining:
-- Hotbar placeholder
-- Vitals placeholder (HP / Stam / Mana)
+---
+
+### Step 9 — Player UI (Stats / Vitals)  
+**Status:** ✅ COMPLETED
+
+Implemented:
+- `PlayerStatsNet`
+- `PlayerVitalsNet`
+- `PlayerSkillBookNet`
+- `HudVitalsUI`
+- `CharacterStatsPanelUI`
+- `LocalPlayerUIBinder`
+
+Acceptance met:
+- Server-authoritative values displayed
+- UI auto-binds on local player spawn
+- No gameplay logic in UI
 
 ---
 
@@ -156,43 +181,61 @@ Remaining:
 ✅ Server-authoritative movement complete  
 ✅ UO-style targeting complete  
 ✅ Double-click interaction complete  
-✅ Visual target feedback complete  
+✅ Player stats / vitals / skills authoritative  
+✅ Read-only UI bound and functional
 
-🚧 Player data model (SO-first) pending  
-🚧 Hotbar & vitals UI pending  
 🚧 Combat not started  
+🚧 Items / equipment not started  
+🚧 Status effects not started
 
 ---
 
 ## Phase 2 — Gameplay Systems (NEXT)
 
-1. **Player Core + Stats (SO-first)**
-2. **Combat Core**
-   - Auto-attack loop
-   - Hit / miss math
-   - Damage packets
-3. **Status Effect System**
-4. **Item Model + Affixes**
-5. **Inventory & Loot Containers**
-6. **Use-based Skill Progression**
+### Step 10 — Skill Gain System
+- Use-based skill gain
+- Skill lock enforcement
+- Server-side gain resolution
+
+### Step 11 — Combat Core
+- Auto-attack loop
+- Hit / miss math
+- Damage packets
+- Death trigger
+
+### Step 12 — Status Effect System
+- Central status registry
+- Timed + conditional effects
+- Damage-over-time
+- Buffs / debuffs
+
+### Step 13 — Item Model + Equipment
+- Equipment slots
+- Stat modifiers
+- Durability
+
+### Step 14 — Inventory, Loot, Death
+- Corpse on death
+- Full loot
+- Insurance system
 
 ---
 
 ## Immediate Next Task (Recommended)
 
-👉 **Step 4 — Player Core Data Model**
+👉 **Step 10 — Skill Gain System**
 
 Reason:
-- Every upcoming system (combat, status, inventory, encumbrance)
-  depends on it
-- Locks numeric authority early
-- Avoids refactors later
+- All skills already exist
+- UI already displays them
+- Locks progression behavior before combat math
 
 ---
 
-If you want, next I can:
-- Break **Step 4** into a mini-checklist  
-- Or write `PLAYER_CORE.md` + starter ScriptableObjects  
-- Or continue UI (Hotbar / Vitals) first
+If you want next:
+- A **SkillGainSystem checklist**
+- A **server-only skill gain prototype**
+- Or move straight into **Combat Core**
 
 Just say the word.
+
