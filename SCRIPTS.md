@@ -1,7 +1,7 @@
 # SCRIPTS.md — Ultimate Dungeon (Authoritative)
 
-Version: 1.0  
-Last Updated: 2026-01-27  
+Version: 1.1  
+Last Updated: 2026-01-27
 
 ---
 
@@ -44,11 +44,94 @@ It is intended to be:
 **Purpose:** Player NGO identity + local player binding.
 
 **Responsibilities (current):**
-- Emits log when local player spawns (OwnerClientId / NetId)
-- Establishes a **local player reference** used by camera + UI binders
+- Detects when a player NetworkObject spawns
+- Establishes **local player ownership** (`IsOwner`)
+- Emits `LocalPlayerSpawned` event used by camera and UI binders
 
 **Notes:**
-- Considered foundational; many “local-only” systems bind through it.
+- Foundational system; many local-only systems bind through it
+
+---
+
+## PLAYER CORE / STATS / VITALS (SERVER-AUTHORITATIVE)
+
+### `PlayerCore`
+**Purpose:** central runtime hub for the player.
+
+**Responsibilities:**
+- Holds reference to `PlayerDefinition`
+- Initializes player systems on the **server**:
+  - `PlayerSkillBook`
+  - `PlayerStats`
+  - `PlayerVitals`
+- Enables server-only systems (e.g. vitals regen)
+
+---
+
+### `PlayerStats`
+**Purpose:** authoritative STR / DEX / INT container.
+
+**Responsibilities:**
+- Stores base attributes from `PlayerDefinition`
+- Applies item and status modifiers
+- Exposes effective STR / DEX / INT values
+
+---
+
+### `PlayerVitals`
+**Purpose:** authoritative HP / Stamina / Mana system.
+
+**Responsibilities:**
+- Derives max vitals from STR / DEX / INT
+- Enforces **150 hard cap** on all vitals
+- Applies slow/classic regen (**server-only**)
+- Handles damage and resource spending
+
+---
+
+### `PlayerSkillBook`
+**Purpose:** authoritative container for all player skills.
+
+**Responsibilities:**
+- Initializes **all skills at character creation**
+- Stores current value per skill
+- Stores skill lock state (+ / − / locked)
+- Enforces total skill cap rules (700)
+
+---
+
+## NETWORK REPLICATION (NGO GLUE)
+
+### `PlayerVitalsNet`
+**Purpose:** NGO replication for player vitals.
+
+**Responsibilities:**
+- Replicates current/max HP, Stamina, Mana via `NetworkVariable<int>`
+- Server writes, everyone reads
+- Provides normalized helpers for UI
+
+---
+
+### `PlayerStatsNet`
+**Purpose:** NGO replication for player stats.
+
+**Responsibilities:**
+- Replicates base and effective STR / DEX / INT
+- Server writes, everyone reads
+- Used exclusively for UI display
+
+---
+
+### `PlayerSkillBookNet`
+**Purpose:** NGO replication for player skills.
+
+**Responsibilities:**
+- Uses `NetworkList<SkillNetState>` to replicate skills
+- Replicates:
+  - SkillId
+  - Value (float)
+  - Lock state
+- Server writes, everyone reads
 
 ---
 
@@ -58,7 +141,7 @@ It is intended to be:
 **Purpose:** binds the camera rig to the local player when that player spawns.
 
 **Responsibilities (current):**
-- Listens for local player spawn
+- Listens for `LocalPlayerSpawned`
 - Binds camera follow/look to the local player
 
 ---
@@ -70,25 +153,25 @@ It is intended to be:
 
 **Responsibilities:**
 - Receives movement intents via ServerRpc
-- Validates sender ownership (sender must be OwnerClientId)
-- Moves the CharacterController toward the server-approved destination
+- Validates sender ownership
+- Moves CharacterController toward server-approved destination
 
 **Notes:**
 - Straight-line movement only (no pathfinding yet)
-- Uses `NetworkTransform` (for now) to replicate server motion
+- Uses `NetworkTransform` for replication (temporary)
 
 ---
 
 ### `ClickToMoveInput_UO`
-**Purpose:** UO-style move input on the owning client.
+**Purpose:** Ultima Online-style move input (client-side).
 
 **Responsibilities:**
-- **Right click press** → send destination under cursor to server
-- **Right click hold** → resend destination at interval (steering)
-- **Right click release** → stop sending updates
+- Right click press → send destination to server
+- Right click hold → resend destination (steering)
+- Right click release → stop sending
 
 **Notes:**
-- Does not move locally; sends intent only.
+- Sends intent only; never moves locally
 
 ---
 
@@ -98,23 +181,19 @@ It is intended to be:
 **Purpose:** local-only target state for the owning client.
 
 **Responsibilities:**
-- Stores `CurrentTarget` (GameObject)
-- `SetTarget()` and `ClearTarget()`
+- Stores `CurrentTarget`
+- Provides `SetTarget()` / `ClearTarget()`
 - Logs target changes
 
 ---
 
 ### `LeftClickTargetPicker_v3`
-**Purpose:** UO-style targeting input (left click).
+**Purpose:** UO-style targeting input.
 
 **Responsibilities:**
-- Casts a single ray from camera
-- Chooses the **nearest** hit
-  - If nearest hit is **Ground** → clear target
-  - Else → set target to hit object (prefers parent NetworkObject)
-
-**Notes:**
-- Fixes “ground behind target steals click” issue.
+- Casts a ray from camera
+- Selects nearest valid hit
+- Clears target when ground is clicked
 
 ---
 
@@ -132,71 +211,101 @@ It is intended to be:
 ---
 
 ### `PlayerInteractor`
-**Purpose:** UO-style “use” via **double left click**.
+**Purpose:** UO-style interaction via double left click.
 
 **Responsibilities:**
-- Detects double left click within window
-- If current target has a NetworkObject → ServerRpc
-- Server validates:
-  - sender is owner of this player
-  - target exists
-  - target implements `IInteractable`
-  - range check
-- Calls `ServerInteract()` on the target
+- Detects double click
+- Sends ServerRpc with current target
+- Server validates ownership, target, and range
+- Calls `ServerInteract()` on target
 
 ---
 
 ### `InteractableDummy`
-**Purpose:** test interactable that logs on server when used.
+**Purpose:** test interactable for validation.
 
 **Responsibilities:**
 - Implements `IInteractable`
-- Logs server interaction including interactor name
+- Logs server-side interaction
 
 ---
 
 ## UI (VISUAL FEEDBACK)
 
-### `TargetFrameUI`
-**Purpose:** minimal Target Frame text.
+### `HudVitalsUI`
+**Purpose:** HUD display for player vitals.
 
 **Responsibilities:**
-- Binds to local `PlayerTargeting` (via `PlayerNetIdentity.Local`)
-- Displays: `Target: <name>` or `Target: None`
+- Displays HP / Stamina / Mana bars
+- Displays numeric Current / Max values
+- Subscribes to `PlayerVitalsNet`
+
+---
+
+### `CharacterStatsPanelUI`
+**Purpose:** character panel for player attributes.
+
+**Responsibilities:**
+- Displays effective STR / DEX / INT
+- Optionally displays base stats
+- Subscribes to `PlayerStatsNet`
+
+---
+
+### `LocalPlayerUIBinder`
+**Purpose:** automatic UI binding for the local player.
+
+**Responsibilities:**
+- Listens for `LocalPlayerSpawned`
+- Binds HUD and panels to replicated components
+- Handles Character panel toggle key
+
+**Notes:**
+- Supports **Input System** and **Legacy Input**
+- UI-only, no gameplay logic
+
+---
+
+### `TargetFrameUI`
+**Purpose:** minimal target frame text.
+
+**Responsibilities:**
+- Displays current target name or None
 
 ---
 
 ### `TargetIndicatorFollower`
-**Purpose:** spawns and positions a ring indicator under the current target.
+**Purpose:** spawns and positions target ring.
 
 **Responsibilities:**
-- Spawns a ring prefab once
-- When a target exists:
-  - positions ring under the target (uses **Renderer/Collider bounds min Y**)
-  - hides ring when target cleared
-
-**Notes:**
-- Correctly handles different pivot heights (cube vs player).
+- Positions ring under current target
+- Hides ring when no target
 
 ---
 
 ### `TargetRingPulse`
-**Purpose:** subtle pulse animation for the ring.
+**Purpose:** subtle pulse animation for target ring.
 
 **Responsibilities:**
-- Uses `MaterialPropertyBlock` to animate color (no material instancing)
-- Auto-fallbacks `_BaseColor` → `_Color` if needed
+- Animates ring color via `MaterialPropertyBlock`
 
 ---
 
 ## PREFABS / SCENE OBJECTS (CURRENT EXPECTED WIRING)
 
 ### Player Prefab (`PF_Player`)
-Expected components (relevant to this doc):
+Expected components:
 - `NetworkObject`
 - `NetworkTransform`
 - `CharacterController`
 - `PlayerNetIdentity`
+- `PlayerCore`
+- `PlayerStats`
+- `PlayerVitals`
+- `PlayerSkillBook`
+- `PlayerStatsNet`
+- `PlayerVitalsNet`
+- `PlayerSkillBookNet`
 - `ServerClickMoveMotor`
 - `ClickToMoveInput_UO`
 - `PlayerTargeting`
@@ -205,33 +314,19 @@ Expected components (relevant to this doc):
 
 ---
 
-### Target Indicator System (Scene)
-- `TargetIndicatorFollower` (references `PF_TargetRing`)
-
-### Target Ring Prefab (`PF_TargetRing`)
-- `TargetRingPulse`
-
----
-
-### Test Interactable (Scene)
-- `NetworkObject`
-- `InteractableDummy`
-
----
-
 ## KNOWN LIMITATIONS (INTENTIONAL)
 
 - No pathfinding
 - No combat
-- No faction / friend-foe tinting yet (planned next)
-- Target selection is local-only (not replicated)
+- No inventory/equipment UI yet
+- Target selection is local-only
 
 ---
 
 ## NEXT PLANNED SCRIPTS
 
-- `FactionTag` (local-only friend/neutral/hostile labeling)
-- `TargetRingFactionTint` (ring color based on faction)
-- Hover highlight (cursor-over feedback)
-- “Walk-to-interact” (double click triggers movement into range, then interact)
+- `SkillGainSystem`
+- `EquipmentComponent`
+- `Death / Corpse / Insurance systems`
+- `FactionTag` and faction-based target tinting
 
