@@ -215,8 +215,9 @@ Every item has:
 
 ### 9.1 Player-Driven Economy
 - NPCs provide baseline goods only
-- Best equipment is player-crafted
+- Best equipment is found in the dungeon
 - Resource scarcity increases with depth
+- Items can be upgraded/enhanced with Resources + Crafting Professions
 
 ### 9.2 Crafting Professions
 - Blacksmithing
@@ -236,7 +237,7 @@ Crafting quality depends on:
 ## 10. Housing & Social Systems
 
 ### 10.1 Player Housing
-- Houses located in Crater Village
+- Houses are located at a players island accessible via a hot-air balloon flight
 - Storage
 - Crafting bonuses
 - Decoration
