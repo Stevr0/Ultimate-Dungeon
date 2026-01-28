@@ -1,11 +1,11 @@
-# PLAYER_COMBAT_STATS.md — ULTIMATE DUNGEON (AUTHORITATIVE)
+# PLAYER_COMBAT_STATS.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.0  
+Version: 1.1  
 Last Updated: 2026-01-28  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
-Determinism: Required (server-seeded)
+Determinism: Required (pure computation; no RNG)
 
 ---
 
@@ -16,14 +16,31 @@ Defines the **authoritative Player Combat Stat Aggregation** rules for *Ultimate
 This document answers one question:
 
 > **How do we compute the player’s final combat-relevant stats**
-> from PlayerDefinition + skills + equipped items/affixes + status effects?
+> from PlayerDefinition + trained skills + equipped items/affixes + status effects?
 
 Combat code (CombatResolver, SwingTimer, Spellcasting, Bandaging) must **never** reach into items/skills directly.
-Instead, combat queries a single authoritative snapshot:
+Instead, combat queries a single server-owned snapshot:
 
 - `PlayerCombatStats` (server-owned)
 
 If an aggregation rule is not defined here, **it does not exist**.
+
+---
+
+## SCOPE BOUNDARIES (NO OVERLAP)
+
+This document **owns**:
+- Aggregation inputs + allowed sources
+- Aggregation policies (Sum / HighestOnly / Multiply / Clamp)
+- The `PlayerCombatStats` snapshot contract
+- Central cap enforcement for aggregated stats
+
+This document does **not** own:
+- Combat resolution order, hit/miss rolls, damage rolls, swing scheduling (owned by `COMBAT_CORE.md`)
+- Item definitions / item lists (owned by `ITEM_DEF_SCHEMA.md` and `ITEM_CATALOG.md`)
+- Affix definitions and per-affix stacking rules (owned by `ITEM_AFFIX_CATALOG.md`)
+- Status definitions (owned by `STATUS_EFFECT_CATALOG.md`)
+- Skill check RNG and progression (owned by `PROGRESSION.md`)
 
 ---
 
@@ -32,24 +49,17 @@ If an aggregation rule is not defined here, **it does not exist**.
 1. **Server authoritative**
    - Only the server computes and owns combat stats.
 
-2. **Deterministic**
+2. **Deterministic & Pure**
    - Stat computation is pure (no RNG).
-   - RNG is only used for hit rolls, damage rolls, procs, etc.
+   - RNG is only used for combat events (hit rolls, damage rolls, procs) in `COMBAT_CORE.md`.
 
 3. **Separation of concerns**
-   - Items contribute **numbers** (affixes/modifiers).
-   - Status effects contribute **gates and multipliers**.
-   - Combat reads only the aggregated result.
+   - Items contribute **numbers** (base stats + affix modifiers).
+   - Status effects contribute **gates and time multipliers**.
+   - Combat reads only the aggregated snapshot.
 
-4. **No hidden stacking**
-   - Every stat must declare an aggregation policy:
-     - Sum
-     - HighestOnly
-     - Multiply
-     - Clamp
-
-5. **Caps are enforced centrally**
-   - Caps are applied in the aggregator, not sprinkled across combat systems.
+4. **Caps enforced centrally**
+   - Caps are applied here, not scattered across combat subsystems.
 
 ---
 
@@ -57,258 +67,193 @@ If an aggregation rule is not defined here, **it does not exist**.
 
 The aggregator may read ONLY from:
 
-1. **PlayerDefinition** (base constants)
-   - Baseline hit/defense
-   - Unarmed profile
-   - Resist cap
+1. **PlayerDefinition** (`PLAYER_DEFINITION.md`)
+   - Baseline hit/defense constants
+   - Unarmed baseline profile
+   - Resistance cap
 
 2. **PlayerStats**
-   - Effective STR/DEX/INT (including item/status attribute mods)
+   - Effective STR/DEX/INT *(already includes any item/status attribute modifiers)*
 
 3. **PlayerSkillBook**
    - Base trained skill values (0–100)
 
 4. **Equipment / ItemInstances**
-   - Equipped items
-   - RolledAffixes[]
+   - Equipped items (instances)
+   - RolledAffixes[] (instances)
    - Base weapon/armor data (from ItemDef)
 
 5. **StatusEffectSystem**
-   - Action blocks (stun/paralyze/silence, etc.)
-   - Multipliers (MoveSpeed, SwingSpeed, CastSpeed)
+   - Action blocks (stun/paralyze/silence/etc.)
+   - Time multipliers (Swing/Cast/Bandage)
+   - Movement multipliers
 
 ---
 
-## OUTPUT: PLAYERCOMBATSTATS SNAPSHOT
+## OUTPUT: PLAYERCOMBATSTATS SNAPSHOT (AUTHORITATIVE)
 
-The server produces a single snapshot struct/class:
+The server produces a single snapshot struct/class.
 
-### Core Combat Chances
-- `float hitChance` *(0..1)*
-- `float defenseChance` *(0..1)*
+### Action Gates (from statuses)
+- `bool canAttack`
+- `bool canCast`
+- `bool canBandage`
+- `bool canMove`
+
+### Core Combat Chances (inputs to Combat Core formula)
+- `float attackerHciPct` *(0..1 delta; e.g., 0.10 = +10%)*
+- `float defenderDciPct` *(0..1 delta)*
+
+> NOTE: Combat Core owns the final hit-chance equation using PlayerDefinition baselines.
 
 ### Damage Modifiers
-- `float damageIncreasePct` *(0..1; e.g. 0.25 = +25%)*
+- `float damageIncreasePct` *(0..1; e.g., 0.25 = +25%)*
 
-### Swing/Cast/Bandage Timing
-- `float swingSpeedMultiplier` *(default 1.0; lower = faster OR higher = faster? see LOCK below)*
-- `float castSpeedMultiplier`
-- `float bandageSpeedMultiplier`
+### Timing Inputs
+- `float swingSpeedAffixPct` *(0..1; HighestOnly from equipment)*
+- `float statusSwingTimeMultiplier` *(time multiplier; product)*
+- `int fasterCastingPoints` *(FC; HighestOnly from equipment)*
+- `float statusCastTimeMultiplier` *(time multiplier; product)*
+- `float statusBandageTimeMultiplier` *(time multiplier; product)*
 
-### Resistances (percent values, already capped)
+> Combat Core and the Magic system own the final time calculations and floors.
+
+### Resistances (integers; capped)
 - `int resistPhysical`
 - `int resistFire`
 - `int resistCold`
 - `int resistPoison`
 - `int resistEnergy`
 
-### Weapon Context (resolved from equipment)
-- `WeaponProfile weapon` (see Weapon Profile block)
+### Weapon Context
+- `WeaponProfile weapon` *(resolved from equipment or unarmed)*
 
-### Proc Context (resolved from affixes)
-- `ProcProfile procs` *(hit spells / leaches)*
-
-### Action Gates (derived from statuses)
-- `bool canAttack`
-- `bool canCast`
-- `bool canBandage`
-- `bool canMove`
+### Proc Context (weapon-only)
+- `ProcProfile procs` *(hit spells + leaches sourced from the active weapon instance)*
 
 ---
 
-## IMPORTANT LOCK: MULTIPLIER SEMANTICS
+## IMPORTANT LOCK: TIME MULTIPLIER SEMANTICS
 
-To avoid confusion, all speed multipliers use the same semantic:
+To avoid confusion, all multipliers scale **time** (seconds):
 
-**Rule (LOCKED):**
-- Multipliers scale **time** (seconds).
 - `FinalTimeSeconds = BaseTimeSeconds * TimeMultiplier`
 
 Meaning:
-- `TimeMultiplier = 1.0` → no change
-- `TimeMultiplier = 0.8` → 20% faster (shorter time)
-- `TimeMultiplier = 1.2` → 20% slower (longer time)
+- `1.0` → no change
+- `0.8` → 20% faster (shorter time)
+- `1.2` → 20% slower (longer time)
 
-So this doc uses:
-- `swingTimeMultiplier`
-- `castTimeMultiplier`
-- `bandageTimeMultiplier`
-
-(Names in code can vary, but semantics must match.)
+This doc uses the names:
+- `statusSwingTimeMultiplier`
+- `statusCastTimeMultiplier`
+- `statusBandageTimeMultiplier`
 
 ---
 
-## BASELINES (FROM PLAYER_DEFINITION)
+## BASELINES & CAPS (SINGLE SOURCES)
 
+### Baselines (from PlayerDefinition)
 From `PLAYER_DEFINITION.md`:
 - `baseHitChance = 0.50`
 - `baseDefenseChance = 0.50`
-- Resist cap = `70`
+- `resistCap = 70`
 - Unarmed profile:
-  - `baseSwingSpeedSeconds = 2.0`
+  - `unarmedBaseSwingSpeedSeconds = 2.0`
   - `unarmedDamageRange = 1..4`
 
----
-
-## AGGREGATION RULES — STAT BY STAT (AUTHORITATIVE)
-
-### 1) HIT CHANCE (HCI)
-
-#### Inputs
-- `baseHitChance` (PlayerDefinition)
-- `HCI%` from item affixes
-- (Future) skill-based HCI contributions
-
-#### Aggregation
-- `hciPct = Sum(all equipped Combat_HitChance affixes)`
-- `hciPct = Clamp(hciPct, 0, HCI_CAP)`
-
-#### Cap (PROPOSED — Not Locked)
-- `HCI_CAP = 0.45` *(+45%)*
-
-#### Output
-- `attackerHitChanceBase = baseHitChance + hciPct`
-
-> CombatResolver applies defender DCI by subtracting (see Combat Core):
-> `FinalHitChance = clamp01(baseHitChance + (AttackerHCI - DefenderDCI))`
->
-> This doc defines how to compute AttackerHCI and DefenderDCI.
+### Floors (owned elsewhere; referenced only)
+- Minimum swing time floor = **1.0s** (owned by `COMBAT_CORE.md`)
+- Cast time floor = **50% of base** (owned by Magic system rules)
+- Bandage time floor = **50% of base** (owned by `COMBAT_CORE.md`)
 
 ---
 
-### 2) DEFENSE CHANCE (DCI)
+## AGGREGATION POLICIES (AUTHORITATIVE)
 
-#### Inputs
-- `baseDefenseChance` (PlayerDefinition)
-- `DCI%` from item affixes
+### 1) HCI% (Hit Chance Increase)
 
-#### Aggregation
-- `dciPct = Sum(all equipped Combat_DefenseChance affixes)`
-- `dciPct = Clamp(dciPct, 0, DCI_CAP)`
+**Source:** `Combat_HitChance` affix (Percent)
 
-#### Cap (PROPOSED — Not Locked)
-- `DCI_CAP = 0.45`
+- `attackerHciPct = Sum(all equipped Combat_HitChance)`
+- `attackerHciPct = Clamp(attackerHciPct, 0, HCI_CAP)`
 
-#### Output
-- `defenderDefenseChanceBase = baseDefenseChance + dciPct`
+**HCI_CAP (PROPOSED — Not Locked):** `0.45`
 
----
+> Combat Core uses: `FinalHitChance = clamp01(baseHitChance + (AttackerHCI - DefenderDCI))`
 
-### 3) DAMAGE INCREASE (DI)
+### 2) DCI% (Defense Chance Increase)
 
-#### Inputs
-- `DI%` from item affixes (`Combat_DamageIncrease`)
-- (Future) skill-based DI (Tactics/Anatomy) — see SKILL_COMBAT_INTEGRATION.md
+**Source:** `Combat_DefenseChance` affix (Percent)
 
-#### Aggregation
-- `diPct = Sum(all equipped Combat_DamageIncrease affixes)`
-- `diPct = Clamp(diPct, 0, DI_CAP)`
+- `defenderDciPct = Sum(all equipped Combat_DefenseChance)`
+- `defenderDciPct = Clamp(defenderDciPct, 0, DCI_CAP)`
 
-#### Cap (PROPOSED — Not Locked)
-- `DI_CAP = 1.00` *(+100%)*
+**DCI_CAP (PROPOSED — Not Locked):** `0.45`
 
-#### Output
-- `damageIncreasePct = diPct`
+### 3) DI% (Damage Increase)
 
----
+**Source:** `Combat_DamageIncrease` affix (Percent)
 
-### 4) SWING TIME MULTIPLIER
+- `damageIncreasePct = Sum(all equipped Combat_DamageIncrease)`
+- `damageIncreasePct = Clamp(damageIncreasePct, 0, DI_CAP)`
 
-Swing time derives from:
-- Base swing time (weapon or unarmed)
-- Dexterity bonus (defined in Combat Core)
-- Affix swing-speed bonus
-- Status multipliers (Haste/Slow)
+**DI_CAP (PROPOSED — Not Locked):** `1.00` *(+100%)*
 
-This aggregator is responsible for producing:
-- `finalSwingTimeSeconds` OR a multiplier and leave calculation to Combat Core.
+### 4) Swing-speed affix input (HighestOnly)
 
-**Rule (LOCKED):**
-- Combat Core owns the final swing-time formula and floor (1.0s).
-- Aggregator supplies only the inputs:
-  - `dex` (already known from PlayerStats)
-  - `swingSpeedAffixPct`
-  - `statusSwingTimeMultiplier`
+**Source:** `Combat_SwingSpeed` affix (Percent)
 
-#### Swing Speed Affix
-- Read from `Combat_SwingSpeed`
-- Stacking rule in affix catalog is `HighestOnly`
+- `swingSpeedAffixPct = Highest(Combat_SwingSpeed across equipped items)`
 
-So:
-- `swingSpeedAffixPct = Highest(Combat_SwingSpeed across equipment)`
+> Combat Core converts this percent bonus into a time factor and applies floors.
 
-*(Note: This is a percent bonus. Combat Core turns it into time scaling.)*
+### 5) Faster Casting (FC) points (HighestOnly)
 
-#### Status swing multiplier
-From Status system:
-- `statusSwingTimeMultiplier = Product(all active status swing multipliers)`
-- Default = 1.0
+**Source:** `Magic_FasterCasting` affix (Flat points)
 
-> In v1, only Haste/Slow are expected. If none exist, this stays 1.0.
+- `fasterCastingPoints = Highest(Magic_FasterCasting across equipped items)`
 
----
+> Magic system converts FC points into time scaling and applies the 50% floor.
 
-### 5) CAST TIME MULTIPLIER
-
-Aggregator supplies:
-- `dex` (PlayerStats)
-- `fasterCasting` (FC) from items (HighestOnly)
-- `statusCastTimeMultiplier` (product)
-
-**Rule (LOCKED):**
-- Magic system enforces cast-time floor of 50% base.
-
-#### Faster Casting (FC)
-From `ITEM_AFFIX_CATALOG.md`:
-- `Magic_FasterCasting` is `HighestOnly`
-
-So:
-- `fasterCastingPoints = Highest(Magic_FasterCasting across equipment)`
-
-**FC → time scaling (PROPOSED — Not Locked):**
-- `fcTimeMultiplier = Clamp(1.0 - (fasterCastingPoints * 0.05), 0.70, 1.0)`
-  - Example: FC 2 → 0.90 (10% faster)
-
-> This can be tuned later, but the existence of FC and HighestOnly is locked.
-
----
-
-### 6) BANDAGE TIME MULTIPLIER
-
-Aggregator supplies:
-- `dex` (PlayerStats)
-- `statusBandageTimeMultiplier` (product)
-
-**Rule (LOCKED):**
-- Combat Core owns the dex formula and 50% floor for bandage time.
-
----
-
-### 7) RESISTANCES (P/F/C/Po/E)
+### 6) Resistances (P/F/C/Po/E)
 
 Resists come from:
 - Armor base resists (from ItemDef)
 - Resist affixes (items)
-- Status effects (optional future)
+- Status resist modifiers (optional future)
 
-**Rule (LOCKED):**
-- Resist totals are integers.
-- Resist cap is enforced (default 70 from PlayerDefinition).
+For each channel:
 
-#### Aggregation
-For each channel (e.g. Fire):
-
-1. `baseResist = Sum(ArmorPiece.BaseResistFire for equipped armor/shield)`
-2. `bonusResist = Sum(Resist_Fire affix magnitudes across equipment)`
+1. `baseResist = Sum(ArmorPiece.BaseResistX for equipped armor/shield)`
+2. `bonusResist = Sum(Resist_X affix magnitudes across equipment)`
 3. `statusResistBonus = Sum(status-based resist bonuses)` *(v1 likely 0)*
 
 `rawResist = baseResist + bonusResist + statusResistBonus`
 
-`finalResist = Clamp(rawResist, 0, ResistCap)`
+`finalResist = Clamp(rawResist, 0, resistCap)`
 
-#### Notes
-- Jewelry has no base resists.
-- Shields may have no base resists unless later authored (v1: only affixes).
+**resistCap is owned by `PLAYER_DEFINITION.md`**.
+
+### 7) Status Gates (canAttack/canCast/canBandage/canMove)
+
+Derived from `STATUS_EFFECT_CATALOG.md` semantics.
+
+Rules:
+- If any active status declares `BlocksWeaponAttacks` → `canAttack = false`
+- If any active status declares `BlocksSpellcasting` → `canCast = false`
+- If any active status declares `BlocksBandaging` → `canBandage = false`
+- If any active status declares `BlocksMovement` → `canMove = false`
+
+### 8) Status Time Multipliers
+
+Aggregator reads time multipliers from statuses and combines them multiplicatively:
+
+- `statusSwingTimeMultiplier = Product(all active swing time multipliers)`
+- `statusCastTimeMultiplier = Product(all active cast time multipliers)`
+- `statusBandageTimeMultiplier = Product(all active bandage time multipliers)`
+
+Default for each is `1.0`.
 
 ---
 
@@ -322,55 +267,30 @@ Use the equipped weapon’s ItemDef weapon block:
 - damage type
 - swing speed seconds
 - stamina cost per swing
-- required combat skill
+- required combat skill (SkillId)
 - ammo type (if ranged)
 
 ### If no weapon is equipped
 Use PlayerDefinition unarmed baseline.
 
 ### If Disarmed status is active
-- The player is treated as **unarmed** for attacks.
+The player is treated as **unarmed** for attacks.
 
 ---
 
 ## PROC PROFILE RESOLUTION (LOCKED)
 
-From `ITEM_AFFIX_CATALOG.md`:
+Proc affixes are **weapon-only**.
 
 ### Hit Spells
-- Allowed weapon-only proc affixes (Hit_Lightning, etc.)
-- Stacking: NoStack (but only weapons can carry them)
-
-Aggregation:
-- Only read from the **active weapon** item instance.
-- `procChance = value on that weapon` (0..1)
+- Only read from the **active weapon ItemInstance**.
+- Resolve proc chance values (0..1) for each allowed hit spell affix present.
 
 ### Hit Leaches
-- Life/Mana/Stamina leach percent
+- Only read from the **active weapon ItemInstance**.
+- Resolve leach percent values (0..1).
 
-Aggregation:
-- Only read from the **active weapon** item instance.
-
----
-
-## STATUS GATES (LOCKED)
-
-Derived from `STATUS_EFFECT_CATALOG.md`.
-
-The aggregator exposes booleans:
-- `canAttack`
-- `canCast`
-- `canBandage`
-- `canMove`
-
-Rules:
-- If any active status declares `BlocksWeaponAttacks` → `canAttack = false`
-- If any active status declares `BlocksSpellcasting` → `canCast = false`
-- If any active status declares `BlocksBandaging` → `canBandage = false`
-- If any active status declares `BlocksMovement` → `canMove = false`
-
-Also expose:
-- `isInvisible` / `isRevealed` (optional, useful for targeting legality)
+> Allowed hit spell IDs and tiering are defined in `ITEM_AFFIX_CATALOG.md`.
 
 ---
 
@@ -378,29 +298,13 @@ Also expose:
 
 When recomputing the snapshot, perform in this order:
 
-1. Read PlayerDefinition baselines
-2. Resolve effective STR/DEX/INT (PlayerStats)
+1. Read PlayerDefinition caps/baselines
+2. Read effective STR/DEX/INT (PlayerStats)
 3. Resolve weapon profile (equipment vs unarmed, plus disarm)
-4. Resolve item-based combat modifiers (HCI/DCI/DI/Resists/FC/LMC/SDI/etc.)
-5. Resolve status gates and multipliers
+4. Aggregate item-based modifiers (HCI/DCI/DI/Resists/FC/etc.)
+5. Aggregate status gates and time multipliers
 6. Apply caps (resist cap, HCI/DCI/DI caps)
 7. Emit snapshot
-
----
-
-## CAPS SUMMARY
-
-### Locked
-- Resist cap: 70 (from PlayerDefinition)
-- Minimum swing time: 1.0s (Combat Core)
-- Cast time floor: 50% base (Magic)
-- Bandage time floor: 50% base (Combat Core)
-
-### Proposed (Not Locked)
-- HCI cap: +45%
-- DCI cap: +45%
-- DI cap: +100%
-- FC scaling: 5% per point, with a floor (tunable)
 
 ---
 
@@ -408,22 +312,32 @@ When recomputing the snapshot, perform in this order:
 
 ### Required runtime component (server)
 - `PlayerCombatStatAggregator`
-  - Inputs: PlayerCore (Definition/Stats/Vitals/Skills), Equipment, StatusEffectSystem
+  - Inputs: PlayerCore (Definition/Stats/Skills), Equipment, StatusEffectSystem
   - Output: `PlayerCombatStats` snapshot
 
-### Events
-- Recompute on:
-  - Equip/unequip
-  - Item durability break/unbreak
-  - Status apply/remove
-  - Skill value changed
-  - Base stat change
+### Recompute triggers
+Recompute on:
+- Equip/unequip
+- Item durability break/unbreak
+- Status apply/remove
+- Skill value changed
+- Base stat change
 
 ### Consumers
-- CombatResolver
-- Spellcasting pipeline
-- Bandage system
-- Targeting legality checks (invisibility)
+- CombatResolver (`COMBAT_CORE.md`)
+- Spellcasting pipeline (Magic docs)
+- Bandage system (`COMBAT_CORE.md`)
+- Targeting legality (invisibility / revealed)
+
+---
+
+## OPEN QUESTIONS (PROPOSED — NOT LOCKED)
+
+- Exact caps:
+  - HCI_CAP
+  - DCI_CAP
+  - DI_CAP
+- Whether status time multipliers should ever use HighestOnly instead of Product (v1 uses Product)
 
 ---
 
