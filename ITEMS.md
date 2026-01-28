@@ -3,434 +3,211 @@
 Version: 1.1  
 Last Updated: 2026-01-28  
 Engine: Unity 6 (URP)  
-Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
-Data Model: ScriptableObjects + runtime instances
+Data: ScriptableObjects-first  
 
 ---
 
 ## PURPOSE
 
-This document defines the **authoritative Item system** for *Ultimate Dungeon*.
+Defines the **authoritative item system laws** for *Ultimate Dungeon*.
 
-Items are a **core pillar** of the game:
-- They define **combat power**
-- They define **risk and loss**
-- They define the **economy and progression pressure**
+This document is the single source of truth for:
+- Item identity model (ItemDef vs ItemInstance)
+- What “Magical” means (affixes / modifiers)
+- Durability and break-state laws (system-level)
+- Containers, stacking, and ownership rules
+- What other documents own (schemas, catalogs)
 
-**Combat MUST NOT be implemented until this document is locked.**
+This document does **not**:
+- List all base items (owned by `ITEM_CATALOG.md`)
+- Define every affix (owned by `ITEM_AFFIX_CATALOG.md`)
+- Define ItemDef fields (owned by `ITEM_DEF_SCHEMA.md`)
 
-If an item rule is not defined here, **it does not exist**.
-
----
-
-## DESIGN LOCKS (ABSOLUTE)
-
-1. **Items drive power** — not character levels
-2. **Server authoritative** — clients never modify item state
-3. **Item instances are unique** — no shared mutable state
-4. **Modifiers, not logic** — items modify stats; systems read stats
-5. **Loss matters** — durability, death, and insurance are enforced
-6. **Data-driven** — all item behavior is defined in data, not hardcoded
-7. **Mundane vs Magical is explicit**
-   - **Mundane** items have **no modifiers** (no base modifiers, no affixes)
-   - **Magical** items have **modifiers applied** (via affixes and/or authored magical bases)
-8. **Enhancement creates magical items**
-   - A mundane item may be enhanced at a crafting station into a magical item
-   - Enhancement may fail and can destroy the item (breakage chance)
+If an item rule is not defined here (or in the referenced authoritative docs), **it does not exist**.
 
 ---
 
-## ITEM MODEL OVERVIEW
+## SCOPE BOUNDARIES (NO OVERLAP)
 
-### Mundane vs Magical Items (LOCKED MODEL)
+### This doc owns (SYSTEM LAWS)
+- Item identity + persistence model
+- What counts as equipment vs consumable vs resource vs container
+- Durability law (when it changes; break behavior)
+- Instance mutation rules (what can change at runtime)
 
-All items in *Ultimate Dungeon* exist in **one of two states**:
-
-- **Mundane** — baseline items with no magical modifiers
-- **Magical** — items enhanced with magical properties
-
-This distinction is **state-based**, not category-based.
-
-**Rule (LOCKED):**
-> Mundane and Magical items share the same `ItemDef`.  
-> The difference exists only at the **ItemInstance** level.
-
-Mundane items:
-- Have **no rolled affixes**
-- Use only base stats defined by `ItemDef`
-- Are safe to use but offer no magical advantages
-
-Magical items:
-- Have one or more **rolled affixes**
-- Gain power through modifiers
-- Carry greater economic value and loss risk
+### Other authoritative docs
+- **ItemDef schema:** `ITEM_DEF_SCHEMA.md`
+- **Base item list + base stats:** `ITEM_CATALOG.md`
+- **Affix list + stacking + tiers:** `ITEM_AFFIX_CATALOG.md`
+- **Affix count determination (loot/enhance):** `ITEM_AFFIX_CATALOG.md` (via `AffixCountResolver` rules)
 
 ---
 
-## ITEM DEFINITION (ItemDef)
+## DESIGN LOCKS (MUST ENFORCE)
 
-`ItemDef` is a **ScriptableObject**.
+1. **Server authoritative**
+   - Only the server creates ItemInstances, rolls affixes, modifies durability, and transfers ownership.
 
-### Authoritative Fields
+2. **Stable IDs**
+   - `ItemDefId` values are stable and append-only in the catalog.
 
-- `ItemDefId` (stable string or enum)
-- `DisplayName`
-- `ItemCategory`
-- `EquipmentSlotMask`
-- `BaseWeight`
-- `MaxDurability`
-- `IsStackable`
-- `MaxStackSize`
-- `BaseModifiers[]` *(allowed, but see Mundane rule below)*
-- `AllowedAffixPools[]`
-- `DefaultItemPowerState` *(Mundane or Magical; see below)*
+3. **Two-layer item model (LOCKED)**
+   - `ItemDef` is immutable data (ScriptableObject)
+   - `ItemInstance` is mutable state (runtime + save)
 
-#### Mundane / Magical at the definition level
+4. **Mundane vs Magical**
+   - Mundane items have **no affixes**.
+   - Magical items have **0..N affixes**.
 
-Some items may be authored as **always-magical** (e.g., rare artifacts) by setting:
-- `DefaultItemPowerState = Magical`
-- and providing `BaseModifiers[]` and/or curated affix definitions.
+5. **Affix cap per item**
+   - Max affixes per item = **5** (locked).
+   - How many affixes an item *actually* gets is determined by a single resolver (see below).
 
-Most items should be authored as **mundane**:
-- `DefaultItemPowerState = Mundane`
-- `BaseModifiers[]` empty
-- no pre-baked magical bonuses
+6. **Jewelry durability is enabled**
+   - Jewelry breaks like other equipment.
 
-> **ItemDefs are immutable at runtime.**
+7. **Material-based base resist profiles are locked**
+   - Cloth/Leather/Metal baseline profiles are owned by `ITEM_CATALOG.md`.
+
+8. **Archery is a separate item family**
+   - Bows/crossbows use ammo items (arrows/bolts) consumed by Combat.
 
 ---
 
-## ITEM INSTANCE (RUNTIME)
+## ITEM IDENTITY MODEL (LOCKED)
 
-Each item carried, equipped, dropped, or looted is an **ItemInstance**.
+### ItemDef (immutable)
+Authored data that describes a type of item.
+- Stored as a ScriptableObject
+- Referenced by stable `ItemDefId`
+- Defines base stats, allowed affix pools, and presentation defaults
 
-### Required Runtime Fields
-
-- `ItemInstanceId` (unique)
-- `ItemDefId`
-- `ItemPowerState` *(Mundane or Magical)*
-- `CurrentDurability`
-- `StackCount`
-- `RolledAffixes[]` *(empty for Mundane)*
-- `IsInsured`
-- `AutoRenewInsurance`
-- `InsuranceCostPaid`
-
-#### Mundane rule (LOCKED)
-
-If `ItemPowerState = Mundane`, then:
-- `RolledAffixes[]` **must be empty**
-- Item contributes **no modifiers** beyond its base weapon/armor numbers
-
-(Weapons still have damage/swing speed; armor still has base resist values. “No modifiers” refers to *bonus stat modifiers/affixes*.)
-
-**Rule (LOCKED):**
-> Only the server may mutate ItemInstance data.
+### ItemInstance (mutable)
+Runtime + saved state.
+- References one `ItemDefId`
+- Contains rolled affixes (if magical)
+- Contains durability state
+- Contains stack count (if stackable)
+- Contains container contents (if container)
+- Contains insurance flags (if applicable)
 
 ---
 
-## ITEM CATEGORIES (LOCKED SET)
+## ITEM FAMILIES (AUTHORITATIVE)
 
-- Weapon
-- Armor
+Item family categorization is data-driven (ItemDef fields), but these families must exist:
+
+- Weapons (melee, ranged)
+- Armor (cloth/leather/metal)
+- Shields
 - Jewelry
-- Consumable
-- Resource
-- Container
-- Tool
-- Quest
+- Consumables
+- Reagents
+- Resources
+- Containers
 
-Categories are **semantic only** and do not grant behavior by themselves.
-
----
-
-## EQUIPMENT SLOTS (LOCKED)
-
-### Weapons
-- MainHand
-- OffHand
-- TwoHanded (occupies both)
-
-### Armor / Wearables
-- Head
-- Torso
-- Arms
-- Hands
-- Legs
-- NeckArmor
-
-### Jewelry
-- Amulet
-- Ring1
-- Ring2
-- Earrings
-
-**Rule:**
-> Items explicitly declare which slot(s) they occupy.
+> The full base list of items is owned by `ITEM_CATALOG.md`.
 
 ---
 
-## WEAPON MODEL (COMBAT-CRITICAL)
+## STACKING RULES (LOCKED)
 
-Weapons must define:
+### Stackable items
+Examples: reagents, ammo, resources.
 
-- `MinDamage`
-- `MaxDamage`
-- `DamageType` (Physical, Fire, Cold, Poison, Energy)
-- `SwingSpeedSeconds`
-- `RequiredSkill` (e.g., Swords, Macing)
-- `StaminaCostPerSwing`
+ItemDef must declare:
+- `isStackable`
+- `stackMax`
 
-Weapons do **not** apply damage directly.
-They expose data consumed by the Combat system.
+ItemInstance stores:
+- `stackCount` (1..stackMax)
 
----
-
-## ARMOR MODEL (COMBAT-CRITICAL)
-
-Armor must define:
-
-- `PhysicalResistance`
-- `FireResistance`
-- `ColdResistance`
-- `PoisonResistance`
-- `EnergyResistance`
-- `DexterityPenalty` (optional, UO-style)
-
-Resistances are **additive modifiers**, capped by Player rules.
+### Non-stackable items
+Equipment, containers, and magical items are non-stackable.
 
 ---
 
-## JEWELRY MODEL
+## CONTAINER RULES (LOCKED)
 
-Jewelry provides **pure modifiers**:
+Containers are ItemInstances that can hold other ItemInstances.
 
-- Attributes (STR / DEX / INT)
-- Hit / Defense Chance
-- Damage Increase
-- Spell modifiers (Faster Casting, SDI, LMC)
-
-Jewelry never defines damage or armor directly.
+Rules:
+- Containers have a capacity model (slots and/or weight), defined on ItemDef.
+- Nested containers are allowed unless explicitly blocked by later rules.
+- Ownership and access are server-validated.
 
 ---
 
-## MODIFIER SYSTEM (LOCKED)
+## DURABILITY (LOCKED SYSTEM LAWS)
 
-Items apply **stat modifiers** only.
+### What durability is
+Durability is per ItemInstance, expressed as:
+- `durabilityCurrent`
+- `durabilityMax`
 
-### Mundane vs Magical
+### When durability changes
+- Combat triggers durability loss for weapons/armor/shields/jewelry per `COMBAT_CORE.md`.
+- Non-combat loss (e.g., crafting mishaps) must be defined by that system.
 
-- **Mundane items** contribute **no bonus modifiers** (no affixes, no base modifiers).
-- **Magical items** contribute modifiers via:
-  - `BaseModifiers[]` (authored magical bases / artifacts)
-  - `RolledAffixes[]` (rolled/enhanced modifiers)
+### Break state behavior (LOCKED)
+When `durabilityCurrent <= 0`:
+- Item becomes **Broken**
+- Broken items contribute **no modifiers** and may be unusable
+- Item remains lootable/tradable unless restricted by economy rules
 
-### Modifier Examples
-
-- `+STR`, `+DEX`, `+INT`
-- `+HitChance`
-- `+DefenseChance`
-- `+DamageIncrease`
-- `+SpellDamageIncrease`
-- `+FasterCasting`
-- `+LowerManaCost`
-- `+Resist[Fire]`
-
-**Rule (CRITICAL):**
-> Items never contain combat logic. They only contribute numbers.
+> Repair rules (materials, skills, success/break) are owned by the crafting system docs (future).
 
 ---
 
-## DURABILITY SYSTEM (LOCKED)
+## MAGICAL ITEMS & AFFIXES (LOCKED)
 
-Every equippable item has durability.
+### Magical definition
+An item is Magical if it has an affix list (possibly empty if explicitly allowed).
 
-### Fields
+### Affix rules
+- Affixes are rolled only by the server.
+- Affixes come from allowed pools on ItemDef.
+- Affix IDs, stacking, tiers, and ranges are owned by `ITEM_AFFIX_CATALOG.md`.
 
-- `MaxDurability`
-- `CurrentDurability`
+### Affix count (NO DUPLICATION)
+Affix count must be determined by a single conceptual resolver:
 
-### Durability Loss
+- **AffixCountResolver** (authoritative rule location: `ITEM_AFFIX_CATALOG.md`)
 
-- Weapons: lose durability on swing
-- Armor: lose durability when wearer is hit
-- Death: durability damage to equipped items
+Inputs (examples):
+- Source type: LootDrop vs Enhancement
+- Player skill used for enhancement (e.g., Blacksmithing/Tailoring)
+- Item rarity / dungeon tier
 
-### Breakage Rule
+Outputs:
+- `affixCount` in range `0..5`
 
-- At `CurrentDurability <= 0`:
-  - Item becomes unusable
-  - Modifiers stop applying
-  - Item remains lootable
-
-### Enhancement Breakage (LOCKED)
-
-Enhancement attempts (see Enhancement section) can destroy an item even if durability is not 0.
-This is separate from normal durability decay.
+**Rule:** No other document re-defines affix-count math.
 
 ---
 
-## CRAFTING & ENHANCEMENT (LOCKED)
+## OWNERSHIP, TRADE, AND ECONOMY (LOCKED INTERFACE)
 
-### Mundane → Magical Enhancement
+This item system must interoperate with:
+- Player Wallet rules (Held/Banked coins) in `PLAYER_DEFINITION.md`
+- Insurance rules in `PLAYER_DEFINITION.md`
+- Death/corpse transfer rules (death system; must obey PlayerDefinition)
 
-Mundane items may be **enhanced** into Magical items at appropriate crafting stations.
-
-Enhancement requires:
-- A valid crafting station (e.g. Forge, Enchanting Table)
-- The Mundane item
-- Required resources (defined per enhancement recipe)
-
-### Enhancement Outcome Rules (LOCKED)
-
-On enhancement attempt:
-
-1. Server validates:
-   - Item is Mundane
-   - Item is enhanceable
-   - Required resources are present
-
-2. Server rolls enhancement result:
-   - **Success** → Item becomes Magical
-   - **Failure** → Item is destroyed (breakage)
-
-3. On success:
-   - `ItemQuality` changes to **Magical**
-   - One or more affixes are rolled
-   - Durability may be reduced as part of enhancement cost
-
-4. On failure:
-   - ItemInstance is destroyed
-   - Resources are consumed
-
-**Rule (CRITICAL):**
-> Enhancement is irreversible.  
-> Magical items cannot revert to Mundane.
+This doc intentionally does not re-specify those systems.
 
 ---
 
-## INVENTORY & CONTAINERS
+## AUTHORING WORKFLOW (RECOMMENDED)
 
-- Inventory is a **container graph**
-- Items may contain other items
-- Containers have:
-  - Capacity
-  - Weight limits
-
-Corpse objects are containers.
-
----
-
-## ENHANCEMENT (MUNDANE → MAGICAL) (LOCKED)
-
-Enhancement is the primary way a player turns a mundane item into a magical item.
-
-### Core Concept
-
-- Players find or craft **Mundane** items.
-- At an appropriate **crafting station**, the player may combine:
-  - The mundane item
-  - Required resources (materials, reagents, essences, etc.)
-- The server performs an **enhancement attempt**.
-- On success:
-  - Item becomes **Magical**
-  - Affixes/modifiers are applied to the ItemInstance
-- On failure:
-  - The item may **break/destroy** based on a breakage chance
-  - Consumed resources are still consumed (default)
-
-### Enhancement Outputs
-
-On successful enhancement:
-- `ItemPowerState` is set to `Magical`
-- `RolledAffixes[]` is populated (one or more entries)
-- The item now contributes modifiers through the standard modifier pipeline
-
-### Breakage Chance (Authoritative)
-
-- Enhancement defines a `breakageChance` per attempt.
-- Breakage is resolved server-side and deterministically.
-- If broken:
-  - The item instance is destroyed (removed from inventory)
-  - No insurance payout occurs (insurance is for death loss, not crafting failure)
-
-### Determinism + Networking
-
-- Client sends **intent**: “Enhance this item with these resources at this station.”
-- Server validates:
-  - Station access
-  - Ownership of item/resources
-  - Eligibility (item must be Mundane unless a future rule allows rerolling)
-  - Skill requirements (if/when crafting skills are hooked)
-- Server rolls deterministically, applies result, replicates.
-
-### Design Notes
-
-- This system naturally supports later depth:
-  - Higher tier resources → better affix pools
-  - Crafting skill affects success/breakage chance
-  - Special stations for specific item categories
-
----
-
-## ITEM INSURANCE (LOCKED)
-
-Insurance is **per-item** and optional.
-
-### Rules
-
-1. Insurance is purchased **up-front**
-2. Cost is paid from **Banked Coins**
-3. Insured items do **not** drop on death
-4. Insurance is consumed on death
-5. Auto-renew attempts to reapply insurance from Banked Coins
-
-Failure to renew → item becomes uninsured.
-
----
-
-## DEATH & LOOT INTERACTION
-
-On player death:
-
-- Corpse container is created
-- All uninsured items transfer to corpse
-- Insured items remain with player
-- Held Coins drop to corpse
-- Banked Coins are untouched
-
----
-
-## NETWORKING RULES
-
-### Server Authoritative
-
-- Inventory contents
-- Equipment state
-- Durability
-- Insurance
-- Item drops
-
-### Client Responsibilities
-
-- Display UI
-- Send equip/unequip requests
-- Send use/interact intents
-
----
-
-## IMPLEMENTATION DEPENDENCIES (UNBLOCKED)
-
-With this document locked, the following systems can be implemented safely:
-
-1. `ItemDef` ScriptableObject
-2. `ItemInstance` runtime struct/class
-3. EquipmentComponent
-4. InventoryComponent
-5. Durability processing
-6. Corpse & loot system
-7. **Combat Core**
+1. Add base items to `ITEM_CATALOG.md` (IDs + base stats)
+2. Create matching `ItemDef` assets
+3. Maintain `ITEM_AFFIX_CATALOG.md` for all affix definitions
+4. Ensure validators enforce:
+   - No unknown `ItemDefId`
+   - No unknown `AffixId`
+   - No invalid pool references
+   - No illegal stacking
 
 ---
 
@@ -441,11 +218,5 @@ This document is **authoritative**.
 Any change must:
 - Increment Version
 - Update Last Updated
-- Explicitly call out combat or save-data implications
-
----
-
-**Items are power.**  
-**Power is risk.**  
-**Risk creates stories.**
+- Call out save-data implications
 
