@@ -1,6 +1,6 @@
 # PLAYER_DEFINITION.md — ULTIMATE DUNGEON (AUTHORITATIVE)
 
-Version: 0.3  
+Version: 0.4  
 Last Updated: 2026-01-28
 
 ---
@@ -37,11 +37,11 @@ This is a **ScriptableObject-first** contract:
 - Client can request actions; server validates and applies state changes.
 
 ### Determinism Contract
-- All derived values must be computable from:
-  - PlayerDefinition (base rules)
-  - Equipped items (properties)
-  - Active status effects
-  - Skill values
+All derived values must be computable from:
+- PlayerDefinition (base rules)
+- Equipped items (properties)
+- Active status effects
+- Skill values
 
 ---
 
@@ -53,7 +53,10 @@ This is a **ScriptableObject-first** contract:
 - `string definitionId` (stable ID, e.g., "player_default")
 - `string displayName` (editor-only friendly name)
 
-### Starting Attributes (LOCKED)
+---
+
+## STARTING ATTRIBUTES (LOCKED)
+
 - `int baseSTR = 10`
 - `int baseDEX = 10`
 - `int baseINT = 10`
@@ -94,13 +97,24 @@ This is a **ScriptableObject-first** contract:
 
 ---
 
-## COMBAT BASELINES (PROPOSED, NOT LOCKED)
+## COMBAT BASELINES (LOCKED)
 
-Defines the baseline math before items/skills modify it.
+These are the **foundation combat constants** used by Combat Core.
+
+**Rule (LOCKED):**
+> Combat math may tune formulas and caps over time, but these baselines are treated as the starting point for all Actors unless explicitly overridden by future world-rule documents.
+
+### Hit / Defense Baselines (LOCKED)
 - `float baseHitChance = 0.50f`
 - `float baseDefenseChance = 0.50f`
+
+> These represent the baseline before equipment/status/skill modifiers.
+
+### Unarmed Baselines (LOCKED)
 - `float baseSwingSpeedSeconds = 2.0f`
 - `Vector2Int unarmedDamageRange = (1, 4)`
+
+> Unarmed damage/swing applies when no weapon is equipped OR when disarmed rules force fallback to unarmed.
 
 ---
 
