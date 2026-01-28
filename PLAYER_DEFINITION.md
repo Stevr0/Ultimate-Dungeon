@@ -1,7 +1,7 @@
-# PLAYER_DEFINITION.md — ULTIMATE DUNGEON (AUTHORITATIVE)
+# PLAYER_DEFINITION.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 0.4  
-Last Updated: 2026-01-28
+Version: 0.5  
+Last Updated: 2026-01-28  
 
 ---
 
@@ -13,6 +13,19 @@ This is a **ScriptableObject-first** contract:
 - Designers edit the definition
 - Runtime systems read from it
 - The server enforces caps and rules derived from it
+
+This document owns:
+- Player baselines (attributes, vitals derivation, regen)
+- Player-wide caps (vitals cap, resistance cap, skill caps)
+- Currency rules (Coins: Held vs Banked)
+- Player rules for insurance and death-loss interaction
+
+This document does **not** own:
+- SkillId list (owned by `SKILL_ID_CATALOG.md`)
+- Combat formulas and order-of-operations (owned by `COMBAT_CORE.md`)
+- Item schemas or item lists (owned by `ITEM_DEF_SCHEMA.md` / `ITEM_CATALOG.md`)
+
+If a player rule is not defined here (or in the referenced authoritative docs), **it does not exist**.
 
 ---
 
@@ -30,15 +43,15 @@ This is a **ScriptableObject-first** contract:
 ## DATA MODEL OVERVIEW
 
 ### Asset Type
-- `PlayerDefinition` (ScriptableObject)
+- `PlayerDefinition : ScriptableObject`
 
-### Runtime Owner
+### Runtime Ownership
 - Server is authoritative.
 - Client can request actions; server validates and applies state changes.
 
 ### Determinism Contract
 All derived values must be computable from:
-- PlayerDefinition (base rules)
+- PlayerDefinition (baselines and caps)
 - Equipped items (properties)
 - Active status effects
 - Skill values
@@ -47,11 +60,11 @@ All derived values must be computable from:
 
 ## AUTHORITATIVE FIELDS
 
-> Field names are recommended; we can rename to match your project conventions.
+> Field names are recommended; rename to match project conventions if needed.
 
 ### Identity
-- `string definitionId` (stable ID, e.g., "player_default")
-- `string displayName` (editor-only friendly name)
+- `string definitionId` *(stable ID, e.g., "player_default")*
+- `string displayName` *(editor-only friendly name)*
 
 ---
 
@@ -65,56 +78,22 @@ All derived values must be computable from:
 
 ## VITALS (LOCKED)
 
-### Vital Caps & Scaling
+### Vital Caps
 - **Absolute Max Cap per Vital: 150**
-- **Current Max Vitals are derived**, not fixed.
 
-#### Derivation Rules (LOCKED)
+### Derivation Rules (LOCKED)
 - **Max HP = STR**, up to 150
 - **Max Stamina = DEX**, up to 150
 - **Max Mana = INT**, up to 150
 
 > Any value beyond the attribute-derived amount must come from:
-> - Item bonuses (e.g., "Increase Max HP")
+> - Item bonuses (e.g., `Vital_MaxHP` affix)
 > - Status effects
 
-**Example:**
-- STR = 100 → Base Max HP = 100
-- Item bonuses = +20 HP
-- Status bonus = +10 HP
-- Final Max HP = 130 (≤ 150 cap)
-
-### Vitals Regen Rules (LOCKED — Classic / UO-style)
+### Regen Rules (LOCKED — Classic / UO-style)
 - `float hpRegenPerSec = 0.05f` *(very slow; healing items/spells are primary)*
 - `float staminaRegenPerSec = 1.0f`
 - `float manaRegenPerSec = 0.5f`
-
-> Regen is modified by:
-> - Encumbrance
-> - Status effects
-> - Meditation (mana)
-> - Sitting/resting states (if added later)
-
----
-
-## COMBAT BASELINES (LOCKED)
-
-These are the **foundation combat constants** used by Combat Core.
-
-**Rule (LOCKED):**
-> Combat math may tune formulas and caps over time, but these baselines are treated as the starting point for all Actors unless explicitly overridden by future world-rule documents.
-
-### Hit / Defense Baselines (LOCKED)
-- `float baseHitChance = 0.50f`
-- `float baseDefenseChance = 0.50f`
-
-> These represent the baseline before equipment/status/skill modifiers.
-
-### Unarmed Baselines (LOCKED)
-- `float baseSwingSpeedSeconds = 2.0f`
-- `Vector2Int unarmedDamageRange = (1, 4)`
-
-> Unarmed damage/swing applies when no weapon is equipped OR when disarmed rules force fallback to unarmed.
 
 ---
 
@@ -127,13 +106,30 @@ These are the **foundation combat constants** used by Combat Core.
   - All start at **0** unless modified
 
 - Resistance Cap:
-  - **70 max per resistance** (unless overridden by world rules)
+  - **70 max per resistance**
+
+> Aggregation of base armor resists + affix resists + status resists is owned by `PLAYER_COMBAT_STATS.md`.
+
+---
+
+## COMBAT BASELINES (LOCKED CONSTANTS)
+
+These are **constants** consumed by `COMBAT_CORE.md` and the stat aggregator.
+Combat formulas and execution order are defined in `COMBAT_CORE.md`.
+
+### Hit / Defense Baselines
+- `float baseHitChance = 0.50f`
+- `float baseDefenseChance = 0.50f`
+
+### Unarmed Baselines
+- `float unarmedBaseSwingSpeedSeconds = 2.0f`
+- `Vector2Int unarmedDamageRange = (1, 4)`
 
 ---
 
 ## SKILLS (LOCKED)
 
-### Skill Cap Rules
+### Skill Caps
 - `int totalSkillCap = 700`
 - `int individualSkillMax = 100`
 
@@ -147,28 +143,19 @@ These are the **foundation combat constants** used by Combat Core.
 Start at 0 unless specified.
 - A list of `(SkillId, startValue)`
 
-### Skill Gain Rules (LOCKED)
+**Rule:**
+- `SkillId` values must exist in `SKILL_ID_CATALOG.md`.
 
-Skill gain is enforced server-side via `SkillGainSystem`.
-
-- Gains are tied to successful/meaningful use
-- Gains can be throttled by time windows
-
-**At Total Skill Cap (700):**
-- Gains may only occur if room is made by lowering another skill
-- Skill locks determine what can lower
-
-**At Individual Skill Max (100):**
-- That skill may not increase further
-
-#### Skill Lock UI Model (LOCKED)
+### Skill Lock UI Model (LOCKED)
 Each skill has one of three states:
 - **Increase (+)** — skill is allowed to increase
 - **Decrease (−)** — skill is allowed to decrease
 - **Locked (🔒)** — skill will not change
 
-> The server validates all gain/loss requests against these locks.
-> UI icons are client-side; authority remains server-side.
+**Authority:**
+- The server validates all gain/loss requests against these locks.
+
+> Skill check + gain logic is executed by `SkillUseResolver` / `SkillGainSystem` per `PROGRESSION.md`.
 
 ---
 
@@ -182,7 +169,7 @@ The player sees two values:
 - **Held Coins**
 - **Banked Coins**
 
-### Rules (LOCKED)
+### Rules
 
 1. **Looting in the dungeon adds to Held Coins**
    - Coins picked up while in dungeon content are added to **Held Coins**.
@@ -204,34 +191,11 @@ The player sees two values:
      - Their **Held Coins remain on the corpse**
      - Banked Coins are not affected
 
-### Authoritative Fields (Recommended)
+### Starting Values (Recommended)
 - `int startingBankedCoins = 0`
 - `int startingHeldCoins = 0`
 
-> Runtime storage should live in an authoritative player wallet component, but the starting values live here.
-
----
-
-## EQUIPMENT SLOTS (LOCKED)
-
-### Weapons
-- MainHand
-- OffHand
-- BothHands (two-handed items occupy both)
-
-### Armor / Wearables
-- Head
-- Torso
-- Arms
-- Hands
-- Legs
-- NeckArmor (gorget/scarf)
-
-### Jewelry
-- Amulet
-- Ring1
-- Ring2
-- Earrings
+> Runtime storage should live in an authoritative player wallet component.
 
 ---
 
@@ -247,27 +211,43 @@ The player sees two values:
 - Player has a **Banked Coins** balance
 - **Insurance Auto-Renew draws from Banked Coins** (LOCKED)
 
+> Container schemas and item lists are defined by the item system docs.
+
 ---
 
 ## ITEM INSURANCE (LOCKED RULES)
 
-### Fields Needed (on Item Instance)
+Insurance is **per-item** and optional.
+
+### Runtime Fields Needed (on ItemInstance)
 - `bool isInsured`
 - `bool autoRenewInsurance`
 - `int insuranceCostPaid` *(optional bookkeeping)*
 
 ### Insurance Purchase
 - Insurance can be toggled on any item (server validated)
-- Cost is paid **up-front** (from **Banked Coins**)
+- Cost is paid **up-front** from **Banked Coins**
 
 ### On Death
 - For each item that would be lootable:
-  - If insured: item remains with player (or returns on respawn) and is not placed in corpse
+  - If insured: item remains with player and is not placed in corpse
   - If auto-renew is enabled: server attempts to withdraw renewal cost from **Banked Coins** and re-apply insurance
   - If insufficient funds: insurance does not renew; item is treated uninsured for that death
 
-> NOTE: Whether insurance "persists" without auto-renew is an implementation detail.
-> Recommended: insurance is a state that can lapse; auto-renew keeps it maintained.
+> Insurance does not protect against crafting/enhancement breakage.
+
+---
+
+## DEATH & LOOT INTERACTION (PLAYER RULES)
+
+On player death (dungeon):
+- Corpse container is created
+- Uninsured items transfer to corpse
+- Insured items remain with player
+- Held Coins remain on corpse
+- Banked Coins are untouched
+
+> Exact corpse transfer mechanics are implemented by the death/loot system, but must obey these rules.
 
 ---
 
@@ -276,10 +256,10 @@ The player sees two values:
 ### Server-Authoritative State
 - Vitals (current/max)
 - Attributes + derived stats
-- Skill values
+- Skill values + lock states
 - Inventory + bank container
-- **Held Coins / Banked Coins** balances
-- Equipment slots
+- Held Coins / Banked Coins balances
+- Equipment state
 - Status effects
 - Death/respawn
 
@@ -289,20 +269,24 @@ The player sees two values:
 
 ---
 
-## OPEN QUESTIONS
+## IMPLEMENTATION DEPENDENCIES (NEXT)
 
-All numeric and behavioral questions in this document are now **LOCKED**.
+With this document locked, you can implement safely:
+1. `PlayerDefinition` ScriptableObject
+2. `PlayerCore` (server binds runtime components)
+3. `PlayerStats` + `PlayerVitals`
+4. `PlayerSkillBook` + replication
+5. `PlayerWallet` (Held/Banked)
+6. Death pipeline hooks (corpse drop rules)
 
 ---
 
-## NEXT IMPLEMENTATION ARTIFACTS
+## DESIGN LOCK CONFIRMATION
 
-After locking the numeric open questions, we implement:
-1. `SkillId` enum + `SkillDef` ScriptableObjects
-2. `PlayerDefinition` ScriptableObject
-3. `PlayerCore` MonoBehaviour (server binds runtime components)
-4. `PlayerStats` + `PlayerVitals`
-5. `PlayerSkillBook` + `SkillGainSystem`
-6. `EquipmentComponent` + replication glue
-7. **PlayerWallet (Coins: Held/Banked) + replication + corpse drop rules**
+This document is **authoritative**.
+
+Any change must:
+- Increment Version
+- Update Last Updated
+- Explicitly call out combat/save-data implications
 
