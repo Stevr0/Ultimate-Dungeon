@@ -1,354 +1,255 @@
 # ITEM_CATALOG.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.2  
+Version: 1.0  
 Last Updated: 2026-01-28  
 Engine: Unity 6 (URP)  
 Authority: Server-authoritative  
-Data: ScriptableObjects-first (`ItemDef`)
+Data: ScriptableObjects-first (`ItemDef` + Catalog)
 
 ---
 
 ## PURPOSE
 
-This document is the **authoritative catalog of all base items** in *Ultimate Dungeon*.
+Defines the **authoritative base item list** for *Ultimate Dungeon*.
 
-It specifies:
-- The **full list** of `ItemDefId`s that exist in the shipped game
-- Each item’s **base stats** (weapon/armor/jewelry/etc.)
-- Which **Affix Pools** the item may roll from when it becomes Magical
+This document is the single source of truth for:
+- The stable list of **ItemDefIds** (append-only)
+- Each item’s **base values** (weapon damage/swing, armor base resists, durability max, weight, stack rules)
+- Material/slot base resist profiles (Cloth / Leather / Metal) and how they are authored into items
 
-This catalog maps 1:1 to `ItemDef` ScriptableObject assets.
-
-**Important:**
-- `ITEMS.md` defines the **system laws**.
-- `ITEM_AFFIX_CATALOG.md` defines **what can roll**.
-- This document defines **what items exist** and their **base values**.
+This document does **not**:
+- Define the ItemDef field schema (owned by `ITEM_DEF_SCHEMA.md`)
+- Define affix IDs, tiers, stacking, or ranges (owned by `ITEM_AFFIX_CATALOG.md`)
+- Define item system laws (owned by `ITEMS.md`)
 
 ---
 
-## DESIGN LOCKS (ABSOLUTE)
+## DESIGN LOCKS (MUST ENFORCE)
 
-1. **Stable IDs**
-   - `ItemDefId` values are stable.
-   - Never reorder or rename shipped IDs without explicit migration.
+1. **Stable IDs (append-only)**
+   - Never reorder or rename shipped ItemDefIds.
+   - Only append new entries.
 
-2. **Base stats are authored**
-   - Base weapon/armor numbers come from `ItemDef`, not runtime logic.
+2. **Base values live here**
+   - Any “base” weapon/armor stats must be authored here (and mirrored in ItemDef assets).
 
-3. **Mundane vs Magical**
-   - Mundane items have no bonus modifiers/affixes.
-   - Magical items are created by loot or enhancement and receive affixes.
+3. **Material resist profiles are locked**
+   - Cloth/Leather/Metal baseline intent is defined here.
 
 4. **Jewelry durability is enabled**
-   - Jewelry items have durability and can break like other equipment.
 
-5. **Material-based base resist profiles are locked**
-   - Cloth, Leather, and Metal armor use locked baseline resist profiles + slot scalars.
-
-6. **Archery is a separate item family**
-   - Bows/crossbows are distinct weapons.
-   - Ammunition (arrows/bolts) are separate stackable items consumed on use.
-
-7. **Catalog → Assets**
-   - Every entry here must have a corresponding `ItemDef` asset.
-   - No “secret” ItemDefs outside the catalog.
+5. **Archery/ammo is separate item family**
+   - Bows/crossbows + arrows/bolts.
 
 ---
 
-## ITEMDEF NAMING & ID RULES
+## CATALOG VS ASSETS (LOCKED WORKFLOW)
 
-Use stable string IDs:
-- `weapon_<family>_<name>`
-- `armor_<material>_<slot>_<name>`
-- `shield_<name>`
-- `jewel_<type>_<name>`
-- `consumable_<name>`
-- `reagent_<name>`
-- `resource_<name>`
-- `container_<name>`
+- **This catalog** is the human-readable authoritative list.
+- **ItemDef assets** are the runtime data.
 
-Examples:
-- `weapon_sword_katana`
-- `armor_leather_torso_tunic`
-- `jewel_ring_gold_band`
-- `reagent_pearl`
-- `resource_iron_ingot`
+**Rule:** Every row in this catalog must have exactly one matching `ItemDef` asset with:
+- `itemDefId` equal to this catalog id
+- Fields populated according to `ITEM_DEF_SCHEMA.md`
+
+An editor validator must enforce:
+- Missing ItemDef assets
+- Duplicate ids
+- Asset values not matching catalog values
 
 ---
 
-## NUMERIC STATUS
+## MATERIAL BASE RESIST PROFILES (LOCKED)
 
-All numeric values below are **PROPOSED (Not Locked)** until Combat baselines are finalized.
+These profiles represent the **intended baseline** per material.
+Exact per-slot values are authored in the base item entries.
 
----
+### Cloth (baseline intent)
+- Very low Physical
+- Low/variable elemental resists
+- No DEX penalty
 
-## AFFIX POOLS (REFERENCE NAMES)
+### Leather (baseline intent)
+- Moderate Physical
+- Moderate elemental resists
+- Low/none DEX penalty
 
-This catalog references pool names that will become `AffixPoolDef` assets.
+### Metal (baseline intent)
+- High Physical
+- Moderate elemental resists
+- Possible DEX penalty
 
-- `Pool_Weapon_Common`
-- `Pool_Weapon_Rare`
-- `Pool_Armor_Common`
-- `Pool_Armor_Rare`
-- `Pool_Shield_Common`
-- `Pool_Shield_Rare`
-- `Pool_Jewelry_Common`
-- `Pool_Jewelry_Rare`
-
----
-
-## WEAPONS — MELEE
-
-### Table Columns
-
-- `ItemDefId`
-- `Name`
-- `Handedness` (MainHand / TwoHanded)
-- `DmgType`
-- `Damage` (min–max)
-- `Swing` (sec)
-- `Stam`
-- `Skill` (Swords/Macing/Fencing)
-- `Dur`
-- `AffixPools`
-
-### SWORDS
-
-| ItemDefId | Name | Handedness | DmgType | Damage | Swing | Stam | Skill | Dur | AffixPools |
-|---|---|---|---|---:|---:|---:|---|---:|---|
-| weapon_sword_dagger | Dagger | MainHand | Physical | 3–6 | 1.75 | 2 | Fencing | 40 | Pool_Weapon_Common |
-| weapon_sword_shortsword | Short Sword | MainHand | Physical | 4–8 | 2.00 | 3 | Swords | 45 | Pool_Weapon_Common |
-| weapon_sword_broadsword | Broadsword | MainHand | Physical | 6–10 | 2.25 | 4 | Swords | 55 | Pool_Weapon_Common |
-| weapon_sword_longsword | Longsword | MainHand | Physical | 7–11 | 2.50 | 4 | Swords | 60 | Pool_Weapon_Rare |
-| weapon_sword_scimitar | Scimitar | MainHand | Physical | 5–9 | 2.00 | 3 | Swords | 50 | Pool_Weapon_Common |
-| weapon_sword_katana | Katana | TwoHanded | Physical | 8–12 | 2.25 | 4 | Swords | 60 | Pool_Weapon_Rare |
-
-### MACING
-
-| ItemDefId | Name | Handedness | DmgType | Damage | Swing | Stam | Skill | Dur | AffixPools |
-|---|---|---|---|---:|---:|---:|---|---:|---|
-| weapon_mace_club | Club | MainHand | Physical | 4–8 | 2.00 | 3 | Macing | 45 | Pool_Weapon_Common |
-| weapon_mace_mace | Mace | MainHand | Physical | 6–10 | 2.25 | 4 | Macing | 55 | Pool_Weapon_Common |
-| weapon_mace_warhammer | War Hammer | TwoHanded | Physical | 9–14 | 2.75 | 5 | Macing | 65 | Pool_Weapon_Rare |
-| weapon_mace_maul | Maul | TwoHanded | Physical | 10–15 | 3.00 | 6 | Macing | 70 | Pool_Weapon_Rare |
-
-### FENCING
-
-| ItemDefId | Name | Handedness | DmgType | Damage | Swing | Stam | Skill | Dur | AffixPools |
-|---|---|---|---|---:|---:|---:|---|---:|---|
-| weapon_fence_kryss | Kryss | MainHand | Physical | 5–9 | 1.75 | 3 | Fencing | 45 | Pool_Weapon_Rare |
-| weapon_fence_spear | Spear | TwoHanded | Physical | 7–12 | 2.50 | 4 | Fencing | 60 | Pool_Weapon_Common |
-| weapon_fence_warfork | War Fork | TwoHanded | Physical | 8–13 | 2.75 | 5 | Fencing | 60 | Pool_Weapon_Rare |
+> Final numeric per-piece values are authored below per item.
 
 ---
 
-## WEAPONS — RANGED (ARCHERY)
+## BASE ITEM LIST (AUTHORITATIVE)
 
-Ranged weapons consume ammunition items.
+> **IMPORTANT:** Append-only. Do not reorder.
+>
+> Columns here map directly to fields in `ITEM_DEF_SCHEMA.md`.
 
-### Table Columns
-
-- `ItemDefId`
-- `Name`
-- `Handedness`
-- `Damage` (min–max)
-- `Swing` (sec)
-- `Stam`
-- `Skill = Archery`
-- `Dur`
-- `AmmoType` (Arrow/Bolt)
-- `AffixPools`
-
-| ItemDefId | Name | Handedness | Damage | Swing | Stam | Skill | Dur | AmmoType | AffixPools |
-|---|---|---|---:|---:|---:|---|---:|---|---|
-| weapon_bow_shortbow | Short Bow | TwoHanded | 6–10 | 2.50 | 4 | Archery | 55 | Arrow | Pool_Weapon_Common |
-| weapon_bow_longbow | Long Bow | TwoHanded | 7–12 | 2.75 | 5 | Archery | 60 | Arrow | Pool_Weapon_Rare |
-| weapon_bow_crossbow | Crossbow | TwoHanded | 8–13 | 3.00 | 6 | Archery | 65 | Bolt | Pool_Weapon_Rare |
-| weapon_bow_heavycrossbow | Heavy Crossbow | TwoHanded | 10–15 | 3.25 | 7 | Archery | 70 | Bolt | Pool_Weapon_Rare |
+### Column Key
+- **Family**: Weapon / Armor / Shield / Jewelry / Consumable / Reagent / Resource / Container
+- **DurMax**: durabilityMax (if usesDurability)
+- **Stack**: stackMax (if isStackable)
 
 ---
 
-## AMMUNITION
+## WEAPONS — MELEE (AUTHORITATIVE)
 
-Ammunition is **consumed on use** (hit or miss), resolved in Combat.
+| ItemDefId | Name | Hand | Skill | Dmg (Min–Max) | Swing (s) | Stam | Type | Range | DurMax | Weight |
+|---|---|---|---|---:|---:|---:|---|---:|---:|---:|
+| weapon_sword_short | Short Sword | MainHand | Swords | 4–8 | 2.25 | 4 | Physical | 2.0 | 60 | 5.0 |
+| weapon_sword_long | Long Sword | MainHand | Swords | 6–12 | 2.75 | 5 | Physical | 2.0 | 70 | 6.0 |
+| weapon_mace_club | Club | MainHand | Macing | 4–9 | 2.50 | 4 | Physical | 2.0 | 65 | 6.0 |
+| weapon_mace_warhammer | War Hammer | TwoHanded | Macing | 10–18 | 3.25 | 7 | Physical | 2.0 | 80 | 10.0 |
+| weapon_fence_spear | Spear | TwoHanded | Fencing | 8–14 | 3.00 | 6 | Physical | 2.0 | 75 | 8.0 |
+| weapon_fence_dagger | Dagger | MainHand | Fencing | 3–7 | 2.00 | 3 | Physical | 2.0 | 55 | 2.0 |
 
-| ItemDefId | Name | AmmoType | DamageBonus | StackMax | Weight |
+> Notes:
+> - Range defaults to Combat Core melee range if omitted; included here for clarity.
+> - Exact balance is tunable; the schema and ownership are locked.
+
+---
+
+## WEAPONS — RANGED (AUTHORITATIVE)
+
+| ItemDefId | Name | Hand | Skill | Dmg (Min–Max) | Swing (s) | Stam | Type | Ammo | Range | DurMax | Weight |
+|---|---|---|---|---:|---:|---:|---|---|---:|---:|---:|
+| weapon_archery_bow | Bow | TwoHanded | Archery | 6–12 | 2.75 | 5 | Physical | Arrow | 12.0 | 65 | 6.0 |
+| weapon_archery_crossbow | Crossbow | TwoHanded | Archery | 8–14 | 3.25 | 6 | Physical | Bolt | 12.0 | 70 | 7.0 |
+
+---
+
+## AMMUNITION (AUTHORITATIVE)
+
+| ItemDefId | Name | Family | Stack | Weight |
+|---|---|---|---:|---:|
+| ammo_arrow | Arrow | Resource | 100 | 0.02 |
+| ammo_bolt | Bolt | Resource | 100 | 0.02 |
+
+> Ammo is consumed by Combat Core: 1 per attack attempt.
+
+---
+
+## ARMOR — CLOTH (AUTHORITATIVE)
+
+| ItemDefId | Name | Material | Slot | P | F | C | Po | E | DexPen | DurMax | Weight |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| armor_cloth_cap | Cloth Cap | Cloth | Head | 1 | 1 | 1 | 0 | 1 | 0 | 35 | 1.0 |
+| armor_cloth_tunic | Cloth Tunic | Cloth | Torso | 2 | 1 | 1 | 1 | 1 | 0 | 45 | 2.0 |
+| armor_cloth_leggings | Cloth Leggings | Cloth | Legs | 2 | 1 | 1 | 1 | 1 | 0 | 40 | 2.0 |
+
+---
+
+## ARMOR — LEATHER (AUTHORITATIVE)
+
+| ItemDefId | Name | Material | Slot | P | F | C | Po | E | DexPen | DurMax | Weight |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| armor_leather_cap | Leather Cap | Leather | Head | 2 | 2 | 1 | 1 | 1 | 0 | 45 | 1.5 |
+| armor_leather_tunic | Leather Tunic | Leather | Torso | 3 | 2 | 2 | 1 | 1 | 0 | 55 | 3.0 |
+| armor_leather_gloves | Leather Gloves | Leather | Hands | 2 | 1 | 1 | 1 | 1 | 0 | 40 | 1.0 |
+
+---
+
+## ARMOR — METAL (AUTHORITATIVE)
+
+| ItemDefId | Name | Material | Slot | P | F | C | Po | E | DexPen | DurMax | Weight |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| armor_metal_helm | Iron Helm | Metal | Head | 4 | 2 | 2 | 1 | 1 | -1 | 60 | 4.0 |
+| armor_metal_chest | Iron Chest | Metal | Torso | 6 | 3 | 2 | 2 | 2 | -2 | 75 | 8.0 |
+| armor_metal_leggings | Iron Leggings | Metal | Legs | 5 | 2 | 2 | 2 | 2 | -2 | 70 | 7.0 |
+
+---
+
+## SHIELDS (AUTHORITATIVE)
+
+| ItemDefId | Name | BlockType | DurMax | Weight |
+|---|---|---|---:|---:|
+| shield_buckler | Buckler | Basic | 60 | 4.0 |
+| shield_kite | Kite Shield | Heavy | 80 | 7.0 |
+
+---
+
+## JEWELRY (AUTHORITATIVE)
+
+| ItemDefId | Name | Slot | DurMax | Weight |
+|---|---|---|---:|---:|
+| jewel_amulet_plain | Plain Amulet | Amulet | 40 | 0.5 |
+| jewel_ring_plain | Plain Ring | Ring | 35 | 0.2 |
+| jewel_earrings_plain | Plain Earrings | Earrings | 35 | 0.2 |
+
+> Jewelry has no base resists; durability is enabled.
+
+---
+
+## CONSUMABLES (AUTHORITATIVE)
+
+| ItemDefId | Name | Type | Stack | UseTime (s) | Weight |
 |---|---|---|---:|---:|---:|
-| ammo_arrow | Arrow | Arrow | +0 | 200 | 0.01 |
-| ammo_bolt | Crossbow Bolt | Bolt | +0 | 200 | 0.01 |
+| consumable_bandage | Bandage | Bandage | 50 | 0.0 | 0.05 |
 
 ---
 
-## ARMOR — MATERIAL BASE RESIST PROFILES (LOCKED)
+## REAGENTS (AUTHORITATIVE)
 
-Armor base resists are authored using a two-step model:
-
-1) **Material Profile** (locked baseline per material)
-2) **Slot Scalar** (locked)
-
-### Profile Values (LOCKED)
-
-| Material | Physical | Fire | Cold | Poison | Energy |
-|---|---:|---:|---:|---:|---:|
-| Cloth | 6 | 2 | 2 | 2 | 2 |
-| Leather | 10 | 4 | 4 | 4 | 4 |
-| Metal | 14 | 6 | 6 | 6 | 6 |
-
-### Slot Scalars (LOCKED)
-
-| Slot | Scalar |
-|---|---:|
-| Head | 0.12 |
-| Torso | 0.30 |
-| Arms | 0.16 |
-| Hands | 0.10 |
-| Legs | 0.22 |
-| NeckArmor | 0.10 |
-
-### Authoring Rule (LOCKED)
-
-For each armor piece:
-- `PieceResist[type] = round(Profile[type] * SlotScalar)`
-
-The tables below follow this rule.
-
----
-
-## ARMOR — CLOTH (FULL SET)
-
-| ItemDefId | Name | Material | Slot | Resists (P/F/C/Po/E) | DexPen | Dur | AffixPools |
-|---|---|---|---|---|---:|---:|---|
-| armor_cloth_head_hood | Cloth Hood | Cloth | Head | 1/0/0/0/0 | 0 | 25 | Pool_Armor_Common |
-| armor_cloth_torso_robe | Cloth Robe | Cloth | Torso | 2/1/1/1/1 | 0 | 35 | Pool_Armor_Rare |
-| armor_cloth_arms_sleeves | Cloth Sleeves | Cloth | Arms | 1/0/0/0/0 | 0 | 25 | Pool_Armor_Common |
-| armor_cloth_hands_gloves | Cloth Gloves | Cloth | Hands | 1/0/0/0/0 | 0 | 20 | Pool_Armor_Common |
-| armor_cloth_legs_pants | Cloth Pants | Cloth | Legs | 1/0/0/0/0 | 0 | 30 | Pool_Armor_Common |
-| armor_cloth_neck_scarf | Cloth Scarf | Cloth | NeckArmor | 1/0/0/0/0 | 0 | 20 | Pool_Armor_Common |
-
----
-
-## ARMOR — LEATHER (FULL SET)
-
-| ItemDefId | Name | Material | Slot | Resists (P/F/C/Po/E) | DexPen | Dur | AffixPools |
-|---|---|---|---|---|---:|---:|---|
-| armor_leather_head_cap | Leather Cap | Leather | Head | 1/0/0/0/0 | 0 | 35 | Pool_Armor_Common |
-| armor_leather_torso_tunic | Leather Tunic | Leather | Torso | 3/1/1/1/1 | 0 | 45 | Pool_Armor_Rare |
-| armor_leather_arms_sleeves | Leather Sleeves | Leather | Arms | 2/1/1/1/1 | 0 | 40 | Pool_Armor_Common |
-| armor_leather_hands_gloves | Leather Gloves | Leather | Hands | 1/0/0/0/0 | 0 | 30 | Pool_Armor_Common |
-| armor_leather_legs_leggings | Leather Leggings | Leather | Legs | 2/1/1/1/1 | 0 | 45 | Pool_Armor_Common |
-| armor_leather_neck_gorget | Leather Gorget | Leather | NeckArmor | 1/0/0/0/0 | 0 | 35 | Pool_Armor_Common |
-
----
-
-## ARMOR — METAL (FULL SET)
-
-Metal armor includes Dexterity penalties (PROPOSED).
-
-| ItemDefId | Name | Material | Slot | Resists (P/F/C/Po/E) | DexPen | Dur | AffixPools |
-|---|---|---|---|---|---:|---:|---|
-| armor_metal_head_helm | Metal Helm | Metal | Head | 2/1/1/1/1 | -1 | 55 | Pool_Armor_Common |
-| armor_metal_torso_chestplate | Metal Chestplate | Metal | Torso | 4/2/2/2/2 | -2 | 70 | Pool_Armor_Rare |
-| armor_metal_arms_arms | Metal Arms | Metal | Arms | 2/1/1/1/1 | -1 | 60 | Pool_Armor_Common |
-| armor_metal_hands_gauntlets | Metal Gauntlets | Metal | Hands | 1/1/1/1/1 | -1 | 55 | Pool_Armor_Common |
-| armor_metal_legs_greaves | Metal Greaves | Metal | Legs | 3/1/1/1/1 | -2 | 65 | Pool_Armor_Common |
-| armor_metal_neck_gorget | Metal Gorget | Metal | NeckArmor | 1/1/1/1/1 | -1 | 55 | Pool_Armor_Common |
-
----
-
-## SHIELDS
-
-| ItemDefId | Name | BlockType | Dur | AffixPools |
-|---|---|---|---:|---|
-| shield_wooden_buckler | Wooden Buckler | Basic | 45 | Pool_Shield_Common |
-| shield_metal_heatershield | Heater Shield | Heavy | 65 | Pool_Shield_Rare |
-
----
-
-## JEWELRY (DURABILITY ENABLED)
-
-Jewelry has no base combat stats; power comes from magical affixes.
-
-| ItemDefId | Name | Slot | Dur | AffixPools |
-|---|---|---|---:|---|
-| jewel_ring_gold_band | Gold Ring | Ring | 30 | Pool_Jewelry_Common |
-| jewel_ring_silver_band | Silver Ring | Ring | 30 | Pool_Jewelry_Common |
-| jewel_amulet_silver | Silver Amulet | Amulet | 30 | Pool_Jewelry_Rare |
-| jewel_amulet_gold | Gold Amulet | Amulet | 35 | Pool_Jewelry_Rare |
-| jewel_earrings_silver | Silver Earrings | Earrings | 25 | Pool_Jewelry_Common |
-| jewel_earrings_gold | Gold Earrings | Earrings | 25 | Pool_Jewelry_Rare |
-
----
-
-## CONSUMABLES
-
-(These are mundane, unless later you add potion/scroll magic systems.)
-
-| ItemDefId | Name | StackMax | Weight | Notes |
-|---|---|---:|---:|---|
-| consumable_bandage | Bandage | 50 | 0.01 | Used by Healing skill (later) |
-| consumable_torch | Torch | 20 | 0.25 | Light source |
-| consumable_food_ration | Food Ration | 20 | 0.25 | Simple food item |
-
----
-
-## REAGENTS (FOR SPELLCASTING)
-
-These correspond to `ReagentId` in your spell schema.
-
-| ItemDefId | Name | StackMax | Weight |
+| ItemDefId | Name | Stack | Weight |
 |---|---|---:|---:|
-| reagent_pearl | Pearl | 200 | 0.01 |
-| reagent_moss | Moss | 200 | 0.01 |
-| reagent_garlic | Garlic | 200 | 0.01 |
-| reagent_ginseng | Ginseng | 200 | 0.01 |
-| reagent_root | Root | 200 | 0.01 |
-| reagent_shade | Shade | 200 | 0.01 |
-| reagent_ash | Ash | 200 | 0.01 |
-| reagent_silk | Silk | 200 | 0.01 |
+| reagent_black_pearl | Black Pearl | 100 | 0.02 |
+| reagent_blood_moss | Blood Moss | 100 | 0.02 |
+| reagent_garlic | Garlic | 100 | 0.02 |
+| reagent_ginseng | Ginseng | 100 | 0.02 |
+| reagent_mandrake_root | Mandrake Root | 100 | 0.02 |
+| reagent_nightshade | Nightshade | 100 | 0.02 |
+| reagent_spiders_silk | Spider's Silk | 100 | 0.02 |
+| reagent_sulfurous_ash | Sulfurous Ash | 100 | 0.02 |
 
 ---
 
-## RESOURCES (CRAFTING)
+## RESOURCES (AUTHORITATIVE)
 
-| ItemDefId | Name | StackMax | Weight | Notes |
-|---|---|---:|---:|---|
-| resource_iron_ore | Iron Ore | 200 | 0.05 | Smelt into ingots |
-| resource_iron_ingot | Iron Ingot | 200 | 0.05 | Blacksmithing base |
-| resource_leather | Leather | 200 | 0.02 | Tailoring base |
-| resource_cloth | Cloth | 200 | 0.02 | Tailoring base |
-| resource_wood_log | Wood Log | 200 | 0.05 | Craft boards/shafts |
-| resource_wood_board | Wood Board | 200 | 0.03 | Carpentry base (later) |
-| resource_feather | Feather | 500 | 0.001 | Arrow crafting |
-| resource_arrow_shaft | Arrow Shaft | 500 | 0.001 | Arrow crafting |
+| ItemDefId | Name | Stack | Weight |
+|---|---|---:|---:|
+| resource_ore_iron | Iron Ore | 50 | 0.5 |
+| resource_ingot_iron | Iron Ingot | 50 | 0.3 |
+| resource_leather | Leather | 50 | 0.2 |
+| resource_cloth | Cloth | 50 | 0.2 |
 
 ---
 
-## CONTAINERS
+## CONTAINERS (AUTHORITATIVE)
 
-| ItemDefId | Name | Capacity | Weight | Notes |
-|---|---|---:|---:|---|
-| container_backpack | Backpack | 50 slots | 1.0 | Player root inventory |
-| container_pouch | Pouch | 10 slots | 0.2 | Small container |
-| container_bag | Bag | 20 slots | 0.5 | Medium container |
-| container_chest_wood | Wooden Chest | 60 slots | 5.0 | World container |
+| ItemDefId | Name | Slots | AllowNested | DurMax | Weight |
+|---|---|---:|---|---:|---:|
+| container_backpack | Backpack | 30 | true | 50 | 2.0 |
+| container_pouch | Pouch | 10 | true | 35 | 1.0 |
 
 ---
 
-## CONTENT AUTHORING WORKFLOW (RECOMMENDED)
+## VALIDATION CHECKLIST (LOCKED)
 
-1. Maintain this catalog as the **design source-of-truth**.
-2. Create one `ItemDef` asset per entry.
-3. Add an editor validator to ensure:
-   - Every `ItemDefId` in assets exists in this doc
-   - No duplicate IDs
-   - No missing required fields
+An editor validator must ensure:
+- Every `ItemDefId` here has a matching `ItemDef` asset
+- Every `ItemDef` asset uses this catalog’s base values
+- No duplicates
+- Append-only changes for shipped content
+
+---
+
+## OPEN QUESTIONS (PROPOSED — NOT LOCKED)
+
+- Full expansion of the base catalog (more weapons/armor variants)
+- Balance pass across damage/swing/durability/weights
 
 ---
 
 ## DESIGN LOCK CONFIRMATION
 
-This document is **authoritative** for the item list.
+This document is **authoritative**.
 
-Numeric balance values may remain **Proposed** until Combat baselines are locked.
-When you lock numbers, increment version and note the change.
+Any change must:
+- Increment Version
+- Update Last Updated
+- Call out save-data implications (new ids affect serialization)
 
