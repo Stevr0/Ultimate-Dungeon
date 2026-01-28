@@ -1,411 +1,253 @@
 # ITEM_DEF_SCHEMA.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.0  
+Version: 1.1  
 Last Updated: 2026-01-28  
 Engine: Unity 6 (URP)  
-Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
-Assets: ScriptableObjects-first
+Data: ScriptableObjects-first (`ItemDef`)
 
 ---
 
 ## PURPOSE
 
-Defines the **authoritative data contract** for `ItemDef` ScriptableObjects in *Ultimate Dungeon*.
+Defines the **authoritative schema** for the `ItemDef` ScriptableObject in *Ultimate Dungeon*.
 
-`ItemDef` is the immutable, authored definition of an item type.
-All runtime state (durability, stack count, rolled affixes, insurance, etc.) lives on **ItemInstance**.
+This document is the single source of truth for:
+- What fields exist on `ItemDef`
+- Which fields are required per item family
+- Validation rules (what is illegal)
 
-This schema must align with:
-- `ITEMS.md` (system laws)
-- `ITEM_AFFIX_CATALOG.md` (affix IDs + rules)
-- `ITEM_CATALOG.md` (the authoritative list of items and their base values)
-
-If a field or behavior is not defined here, **it does not exist**.
-
----
-
-## DESIGN LOCKS (ABSOLUTE)
-
-1. **ItemDef is immutable at runtime**
-   - No durability, stacks, affixes, or insurance stored here.
-
-2. **ItemInstance stores mutable state**
-   - `ItemInstance` references `ItemDefId`.
-
-3. **Server authoritative**
-   - Server validates all equip/use/enhance actions.
-
-4. **Data-driven**
-   - Combat and crafting interpret authored data.
-   - No per-item hardcoded logic.
-
-5. **Stable IDs**
-   - `ItemDefId` is stable and must match the ID used in `ITEM_CATALOG.md`.
+This document does **not**:
+- List the base items (owned by `ITEM_CATALOG.md`)
+- Define affix IDs / tiers / stacking (owned by `ITEM_AFFIX_CATALOG.md`)
+- Define item system laws (owned by `ITEMS.md`)
 
 ---
 
-## PRIMARY ASSET
+## SCOPE BOUNDARIES (NO OVERLAP)
 
-### Asset Type
-
-- `ItemDef : ScriptableObject`
-
-### Naming Convention
-
-- File name: `ItemDef_<Category>_<Name>`
-  - Example: `ItemDef_Weapon_Katana`
-- Internal ID: `itemDefId = "weapon_sword_katana"` (from `ITEM_CATALOG.md`)
+### Owned elsewhere
+- Item identity model (ItemDef vs ItemInstance): `ITEMS.md`
+- Base item list + base stats: `ITEM_CATALOG.md`
+- Affix pools and affix definitions: `ITEM_AFFIX_CATALOG.md`
+- Combat execution rules: `COMBAT_CORE.md`
 
 ---
 
-## ENUMS (AUTHORITATIVE SET)
+## DESIGN LOCKS (MUST ENFORCE)
 
-### ItemCategory
+1. **Stable IDs**
+   - `ItemDefId` is stable and matches an entry in `ITEM_CATALOG.md`.
 
-- Weapon
-- Armor
-- Jewelry
-- Shield
-- Consumable
-- Resource
-- Container
-- Tool
-- Quest
+2. **Server authoritative**
+   - `ItemDef` is authored content; runtime logic reads it; server enforces.
 
-### ItemPowerState
+3. **No hidden fields**
+   - If a field affects gameplay, it must be represented here.
 
-- Mundane
-- Magical
-
-> `DefaultItemPowerState` should be **Mundane** for almost all base items.
-> “Always magical artifacts” are an optional future expansion.
-
-### DamageType
-
-- Physical
-- Fire
-- Cold
-- Poison
-- Energy
-
-### Handedness
-
-- MainHand
-- OffHand
-- TwoHanded
-
-### ArmorMaterial
-
-- Cloth
-- Leather
-- Metal
-
-### EquipmentSlot (LOCKED)
-
-- MainHand
-- OffHand
-- TwoHanded
-- Head
-- Torso
-- Arms
-- Hands
-- Legs
-- NeckArmor
-- Amulet
-- Ring1
-- Ring2
-- Earrings
-
-> Implementation should use a **bitmask** (e.g., `EquipmentSlotMask`) so a single ItemDef can declare which slot(s) it occupies.
-
-### AmmoType
-
-- None
-- Arrow
-- Bolt
+4. **No duplication**
+   - Do not define item lists or affix catalogs in this schema.
 
 ---
 
-## REQUIRED FIELDS (AUTHORITATIVE)
+## ITEMDEF ID RULES (LOCKED)
 
-These fields exist on **every** ItemDef.
+- `ItemDefId` is a stable string.
+- All shipped IDs are append-only in `ITEM_CATALOG.md`.
+- `ItemDefId` naming convention (recommended):
+  - `weapon_<family>_<name>`
+  - `armor_<material>_<slot>_<name>`
+  - `shield_<name>`
+  - `jewel_<type>_<name>`
+  - `consumable_<name>`
+  - `reagent_<name>`
+  - `resource_<name>`
+  - `container_<name>`
 
-### 1) Identity
+---
 
-- `string itemDefId` *(stable; matches ITEM_CATALOG.md)*
+## CORE ITEMDEF FIELDS (AUTHORITATIVE)
+
+These fields exist on every `ItemDef`.
+
+### Identity
+- `string itemDefId` *(stable; must match `ITEM_CATALOG.md`)*
 - `string displayName`
-- `ItemCategory category`
-- `string shortDescription` *(tooltip)*
-- `Sprite icon` *(UI)*
+- `ItemFamily family` *(Weapon/Armor/Shield/Jewelry/Consumable/Reagent/Resource/Container)*
+- `string iconAddress` *(optional; UI)*
 
-### 2) Core Properties
-
-- `float baseWeight`
+### Economy / Inventory
+- `float weight`
 - `bool isStackable`
-- `int maxStackSize` *(required if stackable; else 1)*
+- `int stackMax` *(required if isStackable)*
 
-### 3) Durability
+### Durability
+- `bool usesDurability`
+- `float durabilityMax` *(required if usesDurability)*
 
-- `int maxDurability`
+> Jewelry durability is enabled by design lock (enforced by catalog + assets).
 
-**Rule (LOCKED):**
-- All equippable items (Weapon/Armor/Jewelry/Shield) must have durability > 0.
-- Containers may have durability (optional).
-- Resources/consumables may omit durability (set to 0).
+### Affix Pools
+- `string[] affixPoolRefs` *(names that map to `AffixPoolDef` assets)*
 
-### 4) Item Power Default
-
-- `ItemPowerState defaultItemPowerState`
-
-**Rule (LOCKED):**
-- Default for base gear is `Mundane`.
-
-### 5) Affix Authoring Hooks
-
-- `string[] allowedAffixPoolIds`
-
-Notes:
-- These IDs are references to `AffixPoolDef` assets (created later).
-- Mundane items can still specify pools; they only matter when the item becomes Magical.
+Rules:
+- Mundane items may still declare pools (so they can become magical via loot/enhance).
+- Allowed pools are validated against `ITEM_AFFIX_CATALOG.md`.
 
 ---
 
-## CATEGORY-SPECIFIC DATA BLOCKS
+## WEAPON DATA (AUTHORITATIVE)
 
-`ItemDef` contains optional blocks. Only the relevant block should be enabled.
+Required when `family == Weapon`.
 
-**Rule (LOCKED):**
-> If the category does not match the block, the block must be null/disabled and ignored.
-
----
-
-## WEAPON BLOCK (WeaponData)
-
-### Fields
-
-- `Handedness handedness`
-- `DamageType damageType`
+### WeaponData
+- `WeaponHandedness handedness` *(MainHand / TwoHanded)*
+- `DamageType damageType` *(Physical/Fire/Cold/Poison/Energy; v1 weapons are mostly Physical)*
 - `int minDamage`
 - `int maxDamage`
 - `float swingSpeedSeconds`
 - `int staminaCostPerSwing`
-- `SkillId requiredCombatSkill` *(e.g., Swords, Macing, Fencing, Archery)*
+- `SkillId requiredCombatSkill`
+- `float rangeMeters` *(optional; if not set, combat defaults are used)*
 
-### Ranged Weapon Fields
+### Ranged-only fields
+- `AmmoType ammoType` *(None/Arrow/Bolt)*
 
-- `AmmoType ammoType` *(Arrow/Bolt/None)*
-- `int ammoConsumedPerAttack` *(default 1 for bows/crossbows)*
+#### Schema rule (LOCKED)
+- If `ammoType != None`, weapon is treated as Ranged for Combat and must be TwoHanded.
 
-### Validation Rules (LOCKED)
+#### SkillId rule (LOCKED)
+- `requiredCombatSkill` must be a `SkillId` from `SKILL_ID_CATALOG.md`.
+- This schema must not contain any duplicate SkillId list.
 
-- `minDamage >= 0`
-- `maxDamage >= minDamage`
+---
+
+## ARMOR DATA (AUTHORITATIVE)
+
+Required when `family == Armor`.
+
+### ArmorData
+- `ArmorMaterial material` *(Cloth/Leather/Metal)*
+- `ArmorSlot slot` *(Head/Torso/Arms/Hands/Legs/NeckArmor)*
+- `int resistPhysical`
+- `int resistFire`
+- `int resistCold`
+- `int resistPoison`
+- `int resistEnergy`
+- `int dexPenalty` *(may be 0; metal may be negative)*
+
+#### Resist authoring rule (LOCKED)
+Material baseline profiles + slot scalars are owned by `ITEM_CATALOG.md`.
+This schema simply defines the fields that store the authored results.
+
+---
+
+## SHIELD DATA (AUTHORITATIVE)
+
+Required when `family == Shield`.
+
+### ShieldData
+- `ShieldBlockType blockType` *(Basic/Heavy/etc.)*
+- `int blockChanceBonus` *(optional; v1 may be 0 if block is skill-only)*
+
+> If shields later contribute base resists, they must do so through explicit resist fields (either ShieldData or shared resist fields). No hidden behavior.
+
+---
+
+## JEWELRY DATA (AUTHORITATIVE)
+
+Required when `family == Jewelry`.
+
+### JewelryData
+- `JewelrySlot slot` *(Amulet/Ring/Earrings)*
+
+Rules:
+- Jewelry has durability enabled (via `usesDurability=true`).
+- Jewelry has no base resists/stats by default; power comes from affixes.
+
+---
+
+## CONSUMABLE DATA (AUTHORITATIVE)
+
+Required when `family == Consumable`.
+
+### ConsumableData
+- `ConsumableType type` *(Bandage/Food/Torch/etc.)*
+- `bool isUsable`
+- `float useTimeSeconds` *(optional; v1 may be instant for some types)*
+
+> Spell scrolls/potions can be added later as separate families or subtypes; do not overload this schema with magic rules.
+
+---
+
+## REAGENT DATA (AUTHORITATIVE)
+
+Required when `family == Reagent`.
+
+### ReagentData
+- `ReagentId reagentId` *(must match Magic schema; no duplicates here)*
+
+---
+
+## RESOURCE DATA (AUTHORITATIVE)
+
+Required when `family == Resource`.
+
+### ResourceData
+- `ResourceType type` *(Ore/Ingot/Leather/Cloth/Wood/etc.)*
+
+---
+
+## CONTAINER DATA (AUTHORITATIVE)
+
+Required when `family == Container`.
+
+### ContainerData
+- `int capacitySlots`
+- `bool allowNestedContainers` *(default true)*
+
+---
+
+## VALIDATION RULES (LOCKED)
+
+### Global
+- `itemDefId` must exist in `ITEM_CATALOG.md`.
+- If `isStackable == true` then `stackMax > 1`.
+- If `usesDurability == true` then `durabilityMax > 0`.
+- All `affixPoolRefs` must exist as pool names in `ITEM_AFFIX_CATALOG.md`.
+
+### Weapons
+- `minDamage <= maxDamage`
 - `swingSpeedSeconds > 0`
-- If `ammoType != None` then:
-  - `requiredCombatSkill == Archery`
+- `staminaCostPerSwing >= 0`
+- If `ammoType != None`:
   - `handedness == TwoHanded`
 
----
+### Armor
+- `material` and `slot` must be valid enums.
+- Resist fields must be >= 0.
 
-## ARMOR BLOCK (ArmorData)
-
-### Fields
-
-- `ArmorMaterial material`
-- `EquipmentSlotMask armorSlot` *(Head/Torso/Arms/Hands/Legs/NeckArmor)*
-
-- Base resist values (authorable per piece; catalog currently derives them from locked profiles):
-  - `int resistPhysical`
-  - `int resistFire`
-  - `int resistCold`
-  - `int resistPoison`
-  - `int resistEnergy`
-
-- `int dexterityPenalty` *(optional; may be negative for metal)*
-
-### Validation Rules (LOCKED)
-
-- Armor must occupy exactly one armor slot.
-- Resist values must be >= 0.
+### Jewelry
+- `usesDurability == true` (enforced by content validation)
 
 ---
 
-## SHIELD BLOCK (ShieldData)
+## NEXT STEPS
 
-### Fields
-
-- `EquipmentSlotMask slot` *(must include OffHand)*
-- `string blockType` *(design tag: Basic/Heavy/etc.)*
-
-> Shields are equipment with durability and can have affix pools.
-> The actual parry/block math is handled in Combat.
-
-### Validation Rules (LOCKED)
-
-- Must be equippable in OffHand.
-- Must not be TwoHanded.
-
----
-
-## JEWELRY BLOCK (JewelryData)
-
-### Fields
-
-- `EquipmentSlotMask slot` *(Amulet/Ring/Earrings)*
-
-### Validation Rules (LOCKED)
-
-- Jewelry must occupy exactly one jewelry slot type.
-- Jewelry has durability (per locked decision).
-
----
-
-## CONSUMABLE BLOCK (ConsumableData)
-
-Consumables are used/consumed and may apply effects via other systems.
-
-### Fields (foundation)
-
-- `bool consumedOnUse` *(default true)*
-- `int usesPerStack` *(optional; default 1)*
-
-> More complex consumable effects should be handled by a separate data system (e.g., Status effects, spell scroll learning, potion system).
-
----
-
-## RESOURCE BLOCK (ResourceData)
-
-### Fields
-
-- `string resourceTag` *(e.g., IronOre, IronIngot, Leather, Cloth, Feather, ArrowShaft)*
-
-Resources are stackable, weight-bearing items.
-
----
-
-## REAGENT BLOCK (ReagentData)
-
-Reagents are item defs that correspond to `ReagentId` in magic.
-
-### Fields
-
-- `ReagentId reagentId`
-
-**Rule (LOCKED):**
-- Reagents are stackable.
-
----
-
-## AMMUNITION BLOCK (AmmoData)
-
-Ammo is stackable and consumed by archery weapons.
-
-### Fields
-
-- `AmmoType ammoType` *(Arrow/Bolt)*
-- `int damageBonus` *(optional; default 0)*
-
-**Rule (LOCKED):**
-- Ammo is stackable.
-
----
-
-## CONTAINER BLOCK (ContainerData)
-
-Containers form the inventory graph.
-
-### Fields (foundation)
-
-- `int capacitySlots`
-- `float maxWeight` *(optional; 0 = unlimited)*
-
-> Slot-based capacity is used for early implementation.
-> Later you can add grid sizes or volume rules if desired.
-
----
-
-## TOOL BLOCK (ToolData)
-
-Tools are used for crafting and may have durability.
-
-### Fields (foundation)
-
-- `string toolTag` *(e.g., SmithHammer, SewingKit, TinkerTools)*
-- `int maxUses` *(optional; alternative to durability)*
-
----
-
-## EQUIPMENT SLOT MASK (AUTHORITATIVE)
-
-Implementation should use an `int` bitmask.
-
-**Rule (LOCKED):**
-- Weapons:
-  - MainHand OR TwoHanded
-- Shields:
-  - OffHand
-- Armor:
-  - Exactly one armor slot
-- Jewelry:
-  - Exactly one jewelry slot type
-
----
-
-## VALIDATION (EDITOR + RUNTIME)
-
-### Editor Validation (REQUIRED)
-
-Create an editor-time validator that checks:
-
-- `itemDefId` is non-empty and unique
-- `itemDefId` exists in `ITEM_CATALOG.md` (optional validator stage)
-- Stackability rules:
-  - if `isStackable` then `maxStackSize > 1`
-  - if not stackable then `maxStackSize == 1`
-- Category ↔ block consistency:
-  - Weapon items must have WeaponData enabled; others disabled
-  - Armor items must have ArmorData enabled; others disabled
-  - etc.
-- Equipment durability rules:
-  - Equippable categories must have `maxDurability > 0`
-
-### Runtime Validation (SERVER)
-
-On equip/use requests, server validates:
-- ItemInstance references a valid ItemDef
-- Slot compatibility and conflicts
-- Ownership and container legality
-
----
-
-## SAVE / NETWORK NOTES
-
-- `ItemDef` is never networked directly.
-- Network/Save transmits:
-  - `ItemInstanceId`
-  - `ItemDefId`
-  - runtime state (durability, stack count, affixes, insurance)
-
-Clients resolve `ItemDefId → ItemDef` through a registry.
-
----
-
-## NEXT IMPLEMENTATION ARTIFACTS
-
-1. `ItemDef.cs` (ScriptableObject class)
-2. `ItemDefRegistry` (ItemDefId → ItemDef)
-3. `ItemInstance` runtime model
-4. Editor validator / audit tool
+1. Update `ITEM_CATALOG.md` to ensure every entry has a matching `ItemDef` asset shaped by this schema.
+2. Ensure `requiredCombatSkill` across all weapon defs uses SkillIds from `SKILL_ID_CATALOG.md`.
+3. Add an Editor validator:
+   - Missing/unknown IDs
+   - Invalid family field sets
+   - Missing required blocks (WeaponData/ArmorData/etc.)
 
 ---
 
 ## DESIGN LOCK CONFIRMATION
 
-This schema is **authoritative**.
+This document is **authoritative**.
 
-Changes must:
+Any change must:
 - Increment Version
 - Update Last Updated
-- Call out save-data and content implications
-
+- Call out save-data and tooling implications
