@@ -23,10 +23,11 @@ If a skill is not defined here, **it does not exist**.
 
 1. **Use-based progression only**
 2. **Total Skill Cap = 700** (enforced server-side)
-3. **Manual cap management**
+3. **Individual Skill Cap = 100**
+4. **Manual cap management**
    - At cap, skills only increase if another skill is set to Decrease (−)
-4. **Server authoritative**
-5. **Skills modify outcomes, not permissions**
+5. **Server authoritative**
+6. **Skills modify outcomes, not permissions**
 
 ---
 
