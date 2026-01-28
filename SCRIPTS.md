@@ -1,7 +1,7 @@
 # SCRIPTS.md — Ultimate Dungeon (Authoritative)
 
-Version: 1.1  
-Last Updated: 2026-01-27
+Version: 1.2  
+Last Updated: 2026-01-28
 
 ---
 
@@ -44,7 +44,7 @@ It is intended to be:
 **Purpose:** Player NGO identity + local player binding.
 
 **Responsibilities (current):**
-- Detects when a player NetworkObject spawns
+- Detects when a player `NetworkObject` spawns
 - Establishes **local player ownership** (`IsOwner`)
 - Emits `LocalPlayerSpawned` event used by camera and UI binders
 
@@ -76,6 +76,11 @@ It is intended to be:
 - Applies item and status modifiers
 - Exposes effective STR / DEX / INT values
 
+**Recent changes:**
+- Added server-only base stat progression hook required by `StatGainSystem`:
+  - `IncreaseBaseStat(StatId statId, int amount)`
+  - *(optional)* `GetTotalBaseStats()`
+
 ---
 
 ### `PlayerVitals`
@@ -87,6 +92,9 @@ It is intended to be:
 - Applies slow/classic regen (**server-only**)
 - Handles damage and resource spending
 
+**Recent changes:**
+- Added `RecomputeMax(PlayerStats stats)` helper to update max vitals after stat changes.
+
 ---
 
 ### `PlayerSkillBook`
@@ -97,6 +105,88 @@ It is intended to be:
 - Stores current value per skill
 - Stores skill lock state (+ / − / locked)
 - Enforces total skill cap rules (700)
+
+---
+
+## PROGRESSION (SERVER-AUTHORITATIVE)
+
+### `SkillGainSystem`
+**Purpose:** authoritative skill gain + cap enforcement.
+
+**Responsibilities:**
+- Applies gains in 0.1 steps
+- Enforces **total skill cap** (700)
+- Respects skill lock states (+ / − / locked)
+- At cap: decreases highest eligible “Decrease (−)” skill to make room
+
+**Notes:**
+- This is the last progression law system locked before combat math.
+
+---
+
+### `DeterministicRng`
+**Purpose:** deterministic per-event RNG helper for server-side rolls.
+
+**Responsibilities:**
+- Produces repeatable results from a stable integer seed
+- Provides seed mixing helper (`CombineSeed`)
+
+**Notes:**
+- Used by progression systems (and later by combat checks) to avoid global RNG state.
+
+---
+
+### `StatId`
+**Purpose:** minimal enum for primary attributes.
+
+**Values:**
+- `STR`
+- `DEX`
+- `INT`
+
+---
+
+### `StatGainSystem`
+**Purpose:** authoritative base stat gain system (UO-like).
+
+**Responsibilities:**
+- Attempts +1 base stat gains (default)
+- Uses deterministic RNG provided by caller
+- Leaves explicit hooks for future stat cap rules (not locked yet)
+- Provides helper mapping `SkillId -> StatId` (temporary scaffolding)
+
+**Notes:**
+- Does **not** recompute vitals; callers must call `PlayerVitals.RecomputeMax(...)` once per event if a stat gain occurs.
+
+---
+
+### `SkillUseResolver` *(Scaffolding — Not Wired Yet)*
+**Purpose:** bridge between gameplay actions and progression.
+
+**Responsibilities (planned):**
+- Resolves a skill check result deterministically
+- Attempts skill gain via `SkillGainSystem`
+- Attempts stat gain via `StatGainSystem`
+- Recomputes vitals once if stats changed
+
+**Status:**
+- Exists as scaffolding but is not yet the primary caller for interaction/combat.
+
+---
+
+### `InteractableSkillUseTester` *(Test Harness)*
+**Purpose:** quick end-to-end test for skill + stat gains.
+
+**Responsibilities:**
+- Implements `IInteractable`
+- When interacted with (double left click):
+  - Calls `SkillGainSystem.TryApplyGain(...)`
+  - Calls `StatGainSystem.TryApplyStatGain(...)`
+  - Recomputes vitals once if a stat gain occurred
+- Logs results server-side
+
+**Notes:**
+- Temporary; will be removed once combat/crafting are wired into `SkillUseResolver`.
 
 ---
 
@@ -222,11 +312,15 @@ It is intended to be:
 ---
 
 ### `InteractableDummy`
-**Purpose:** test interactable for validation.
+**Purpose:** legacy test interactable for validation.
 
 **Responsibilities:**
 - Implements `IInteractable`
 - Logs server-side interaction
+
+**Notes:**
+- Still present; when both `InteractableDummy` and another `IInteractable` are on the same object,
+  the first component found will be used. Prefer having only one `IInteractable` per object.
 
 ---
 
@@ -291,6 +385,19 @@ It is intended to be:
 
 ---
 
+### `TargetRingFactionTint`
+**Purpose:** tints the target ring based on `FactionTag`.
+
+**Responsibilities:**
+- Reads the local player’s current target
+- Applies friendly/neutral/hostile tint via `TargetRingPulse`
+
+**Notes:**
+- Updated to use `GetComponentInParent<TargetIndicatorFollower>()`
+- Avoids `FindObjectOfType` to prevent multiplayer mix-ups
+
+---
+
 ## PREFABS / SCENE OBJECTS (CURRENT EXPECTED WIRING)
 
 ### Player Prefab (`PF_Player`)
@@ -325,8 +432,9 @@ Expected components:
 
 ## NEXT PLANNED SCRIPTS
 
-- `SkillGainSystem`
-- `EquipmentComponent`
-- `Death / Corpse / Insurance systems`
-- `FactionTag` and faction-based target tinting
+- `FactionTag` (data + utilities)
+- Combat core (hit/miss math + swing timer)
+- `SkillUseResolver` wiring (combat/casting/crafting)
+- Equipment / item property system
+- Death / corpse / insurance systems
 
