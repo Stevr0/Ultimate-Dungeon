@@ -1,7 +1,7 @@
 # ROADMAP.md — Ultimate Dungeon
 
-Version: 1.2  
-Last Updated: 2026-01-27  
+Version: 1.3  
+Last Updated: 2026-01-28  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
@@ -20,7 +20,7 @@ A **step-by-step, logical build order** for the first playable vertical slice of
 - Ultima Online–style click-to-move works
 - Targeting + interaction + visual feedback exists
 - Player stats / vitals / skills are visible and authoritative
-- Combat can be added **without rewriting foundations**
+- Progression laws are locked **before combat math**
 
 ---
 
@@ -34,7 +34,7 @@ A **step-by-step, logical build order** for the first playable vertical slice of
 
 ---
 
-## Phase 1 — Multiplayer Foundation (MOSTLY COMPLETE)
+## Phase 1 — Multiplayer Foundation (COMPLETE)
 
 ### Step 0 — Repo + Project Hygiene  
 **Status:** ✅ COMPLETED
@@ -154,10 +154,16 @@ Implemented:
 - `TargetIndicatorFollower`
 - Bounds-correct target ring placement
 - `TargetRingPulse`
+- `TargetRingFactionTint`
+
+Acceptance met:
+- Target ring appears only for local player
+- Ring tracks target bounds correctly
+- Faction-based tinting works
 
 ---
 
-### Step 9 — Player UI (Stats / Vitals)  
+### Step 9 — Player UI (Stats / Vitals / Skills)  
 **Status:** ✅ COMPLETED
 
 Implemented:
@@ -175,6 +181,35 @@ Acceptance met:
 
 ---
 
+## Phase 2 — Progression & Gameplay Laws
+
+### Step 10 — Skill & Stat Gain System (LOCKED)
+**Status:** ✅ COMPLETED
+
+Implemented:
+- `SkillGainSystem`
+  - Use-based gains
+  - Skill lock enforcement (+ / − / locked)
+  - Total skill cap handling (700)
+- `StatGainSystem`
+  - UO-style +1 base stat gains
+  - Deterministic RNG (caller-provided)
+  - Explicit hooks for future stat caps
+- `DeterministicRng`
+- `StatId`
+
+Validation:
+- `InteractableSkillUseTester` confirms:
+  - Skill gain works end-to-end
+  - Stat gain works end-to-end
+  - Vitals recompute once per stat change
+
+**Design Outcome:**
+- Progression laws are now locked
+- Combat math can be built safely on top
+
+---
+
 ## CURRENT PROJECT STATE (SUMMARY)
 
 ✅ Networking & spawning complete  
@@ -182,39 +217,58 @@ Acceptance met:
 ✅ UO-style targeting complete  
 ✅ Double-click interaction complete  
 ✅ Player stats / vitals / skills authoritative  
-✅ Read-only UI bound and functional
+✅ Progression laws locked (skills + stats)
 
 🚧 Combat not started  
-🚧 Items / equipment not started  
-🚧 Status effects not started
+🚧 Status effects not started  
+🚧 Items / equipment not started
 
 ---
 
-## Phase 2 — Gameplay Systems (NEXT)
+## Phase 3 — Combat & Survival Systems (NEXT)
 
-### Step 10 — Skill Gain System
-- Use-based skill gain
-- Skill lock enforcement
-- Server-side gain resolution
+### Step 11 — Combat Core (NEXT LOCK)
 
-### Step 11 — Combat Core
-- Auto-attack loop
-- Hit / miss math
+Planned:
+- Auto-attack loop (swing timer)
+- Hit / miss resolution
 - Damage packets
 - Death trigger
 
+Design constraints:
+- Must consume stamina
+- Must integrate with skill + stat values
+- Must NOT modify progression rules
+
+---
+
 ### Step 12 — Status Effect System
+
+Planned:
 - Central status registry
 - Timed + conditional effects
 - Damage-over-time
 - Buffs / debuffs
 
+Design rule:
+- Status effects modify combat and survival
+- Status effects do NOT grant raw power alone
+
+---
+
 ### Step 13 — Item Model + Equipment
+
+Planned:
 - Equipment slots
 - Stat modifiers
 - Durability
+- Random properties
+
+---
 
 ### Step 14 — Inventory, Loot, Death
+
+Planned:
 - Corpse on death
 - Full loot
 - Insurance system
@@ -223,19 +277,19 @@ Acceptance met:
 
 ## Immediate Next Task (Recommended)
 
-👉 **Step 10 — Skill Gain System**
+👉 **Step 11 — Combat Core (Hit / Miss + Swing Timer)**
 
 Reason:
-- All skills already exist
-- UI already displays them
-- Locks progression behavior before combat math
+- Progression laws are locked
+- UI and replication already exist
+- Combat can now be implemented without refactors
 
 ---
 
 If you want next:
-- A **SkillGainSystem checklist**
-- A **server-only skill gain prototype**
-- Or move straight into **Combat Core**
+- A **Combat Core design doc**
+- A **server-only combat prototype**
+- Or a **Status Effect architecture draft**
 
 Just say the word.
 
