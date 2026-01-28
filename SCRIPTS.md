@@ -1,6 +1,6 @@
 # SCRIPTS.md — Ultimate Dungeon (Current Script Inventory)
 
-Version: 1.3  
+Version: 1.4  
 Last Updated: 2026-01-29
 
 ---
@@ -16,20 +16,53 @@ It exists to:
 - Help with prefab/scene wiring and cleanup
 - Identify legacy or transitional systems
 
-Authoritative behavior and rules live in the design docs (PLAYER_*, COMBAT_*, etc.).
+Authoritative behavior and rules live in the design docs:
+- `ACTOR_MODEL.md`
+- `TARGETING_MODEL.md`
+- `COMBAT_CORE.md`
+- `PLAYER_DEFINITION.md`
+- `STATUS_EFFECT_CATALOG.md`
 
 ---
 
 ## DESIGN CONTEXT (LOCKED)
 
-- **Unity 6 (URP)**
-- **Netcode for GameObjects (NGO)**
-- **Server-authoritative gameplay**
-- **Ultima Online–style controls**
+- Unity 6 (URP)
+- Netcode for GameObjects (NGO)
+- Server-authoritative gameplay
+- Ultima Online–style controls
   - Right click: move
   - Right click hold: continuous steering
   - Left click: target/select
   - Double left click: attack or interact
+
+---
+
+## NEW ACTOR/TARGETING REQUIREMENTS (AS OF 2026-01-29)
+
+These are required for the current design direction and must exist as scripts (some may be new).
+
+### Actor Layer (required)
+- `ActorComponent` *(NEW — required)*
+  - Exposes Actor identity: ActorType, FactionId, CombatState, alive/dead
+  - Present on Player, Monster, NPC, Summon, Pet
+
+- `FactionService` *(NEW — pure rules)*
+  - Relationship matrix lookup from `ACTOR_MODEL.md`
+
+- `TargetingResolver` *(NEW — pure rules)*
+  - Eligibility + Disposition + AttackLegality evaluation
+  - Must not reference UI or Unity objects directly
+
+- `ServerTargetValidator` *(NEW — server utility)*
+  - Resolves NetworkObjectId → Actor
+  - Calls `TargetingResolver` for action-time validation
+
+- `CombatStateTracker` *(NEW — server system)*
+  - Tracks aggression events
+  - Drives CombatState transitions (Idle/Engaged/InCombat/Dead)
+
+> Note: Combat Core must call CombatStateTracker on hostile actions.
 
 ---
 
@@ -100,24 +133,7 @@ Initializes:
 ---
 
 ### `SkillUseResolver` *(Scaffolding)*
-**Purpose:** Planned bridge between gameplay actions and progression.
-
----
-
-## NETWORK REPLICATION (UI ONLY)
-
-### `PlayerVitalsNet`
-**Purpose:** Replicates vitals to clients.
-
----
-
-### `PlayerStatsNet`
-**Purpose:** Replicates stats to clients.
-
----
-
-### `PlayerSkillBookNet`
-**Purpose:** Replicates skills to clients.
+**Purpose:** Bridge between gameplay actions and progression.
 
 ---
 
@@ -140,19 +156,27 @@ Initializes:
 
 ---
 
-## TARGETING (LOCAL-ONLY)
+## TARGETING (LOCAL-ONLY SELECTION)
 
 ### `PlayerTargeting`
 **Purpose:** Local-only target state.
 
 **Responsibilities:**
-- Stores `CurrentTarget`
+- Stores selected target (recommended: NetworkObjectId)
 - Emits `OnTargetSet` / `OnTargetCleared` events
+
+**Notes:**
+- This is UX-only. It does not imply legality.
+- Server validation must occur on action attempts (`ServerTargetValidator`).
 
 ---
 
 ### `LeftClickTargetPicker_v3`
 **Purpose:** UO-style target selection via raycast.
+
+**Notes (alignment):**
+- Should select only objects that expose `ActorComponent` (recommended filter)
+- Must clear target on empty click
 
 ---
 
@@ -167,8 +191,8 @@ Initializes:
 **Purpose:** Sends interaction intent to server.
 
 **Notes:**
-- No longer hard-wired to left click
 - Intended to be triggered by explicit input (double click / key)
+- Must validate target actor via server-side validation path before executing
 
 ---
 
@@ -177,7 +201,7 @@ Initializes:
 
 **Notes:**
 - Transitional utility
-- Should be used sparingly; gameplay-specific interactables preferred
+- Prefer gameplay-specific interactables
 
 ---
 
@@ -186,14 +210,18 @@ Initializes:
 ### `ICombatActor`
 **Purpose:** Minimal combat-facing actor contract.
 
+**Notes (alignment):**
+- Should be implementable by any Actor that can fight
+- Must not assume Player-only fields
+
 ---
 
 ### `CombatActorFacade`
 **Purpose:** Adapts runtime actors (player, enemy, dummy) to combat core.
 
-**Notes:**
-- Uses `ActorVitals` as combat HP source
-- Logs warning if missing
+**Notes (alignment):**
+- Should read identity from `ActorComponent`
+- Should expose vitals from `ActorVitals` (or unified vitals source)
 
 ---
 
@@ -201,28 +229,44 @@ Initializes:
 **Purpose:** Combat-only HP container.
 
 **Notes:**
-- Used by all combat actors (including player)
-- Separate from `PlayerVitals`
+- Used by all combat actors
+- Currently separate from `PlayerVitals`
+- Planned cleanup: unify or establish an authoritative mapping
 
 ---
 
 ### `PlayerCombatController`
 **Purpose:** Client → server bridge for attack intent.
 
+**Notes (alignment):**
+- Must pass selected target as stable ID
+- Server must validate target via `ServerTargetValidator` before starting attacks
+
 ---
 
 ### `AttackLoop`
 **Purpose:** Server-side swing timer and attack loop.
+
+**Notes (alignment):**
+- Must pre-check legality before starting
+- Must revalidate legality on swing completion
 
 ---
 
 ### `CombatResolver`
 **Purpose:** Resolves hit, damage, and death.
 
+**Notes (alignment):**
+- Executes combat only after legality pre-check
+- Must notify `CombatStateTracker` on hostile actions
+
 ---
 
 ### `DoubleClickAttackInput`
 **Purpose:** Detects double left click and requests attack.
+
+**Notes (alignment):**
+- UX-only; does not imply legality
 
 ---
 
@@ -246,6 +290,9 @@ Initializes:
 ### `TargetFrameUI`
 **Purpose:** Displays current target name.
 
+**Notes (alignment):**
+- Should display disposition indicator (friendly/neutral/hostile) once available
+
 ---
 
 ### `TargetIndicatorFollower`
@@ -256,22 +303,34 @@ Initializes:
 ### `TargetRingPresenter`
 **Purpose:** Changes target ring state based on targeting and combat.
 
+**Notes (alignment):**
+- Must consume:
+  - Local selection events (instant)
+  - Server-replicated disposition/combat state (authoritative)
+
 ---
 
 ### `TargetRingPulse`
 **Purpose:** Visual pulse animation for target ring.
+
+**Notes (alignment):**
+- Should pulse when target or viewer is `CombatState.InCombat` (as desired)
 
 ---
 
 ### `TargetRingFactionTint`
 **Purpose:** Applies faction-based color tint to target ring.
 
+**Notes (alignment):**
+- Must tint from `TargetingDisposition` (Self/Friendly/Neutral/Hostile/Invalid)
+- Must not hardcode “enemy vs neutral” ad-hoc rules
+
 ---
 
 ## PREFABS (EXPECTED CURRENT STATE)
 
 ### Player Prefab (`PF_Player`)
-Expected components (current):
+Expected components (current + required alignment):
 - `NetworkObject`
 - `NetworkTransform`
 - `CharacterController`
@@ -292,6 +351,7 @@ Expected components (current):
 - `PlayerCombatController`
 - `CombatActorFacade`
 - `AttackLoop`
+- **`ActorComponent` (NEW required)**
 
 ---
 
@@ -300,15 +360,26 @@ Expected components (current):
 - No pathfinding
 - No inventory/equipment UI
 - No ranged combat
-- No spellcasting
+- No spellcasting pipeline
 - Death visuals minimal
+- Actor layer scripts (listed above) may not exist yet and must be implemented
 
 ---
 
 ## NEXT CLEANUP TARGETS
 
-- Remove legacy interactables
-- Consolidate input listeners
-- Unify PlayerVitals ↔ ActorVitals data flow
-- Replace debug combat dummy with real enemy prefab
+1. Implement Actor layer scripts:
+   - `ActorComponent`
+   - `FactionService`
+   - `TargetingResolver`
+   - `ServerTargetValidator`
+   - `CombatStateTracker`
+
+2. Unify `PlayerVitals` ↔ `ActorVitals` data flow
+
+3. Update targeting UI:
+   - Drive ring tint from `TargetingDisposition`
+   - Drive ring pulse from `CombatState`
+
+4. Replace debug combat dummy with real enemy prefab implementing `ActorComponent`
 
