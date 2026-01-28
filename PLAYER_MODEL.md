@@ -1,330 +1,242 @@
-# PLAYER_MODEL.md — ULTIMATE DUNGEON (AUTHORITATIVE)
+# PLAYER_MODEL.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 0.1  
-Last Updated: 2026-01-27  
+Version: 0.2  
+Last Updated: 2026-01-28
 
 ---
 
 ## PURPOSE
 
-This document defines the **Player Actor** data model and runtime contract for *Ultimate Dungeon*.
+This document defines the **Player Actor runtime model and architectural contract** for *Ultimate Dungeon*.
 
-The player is a networked Actor in a **server-authoritative** world. Progression is **classless, skill-based**. All gameplay systems (combat, items, statuses, skills, UI) must bind to this model.
+It answers the question:
+
+> *What is a Player at runtime, and how do systems are allowed to interact with it?*
+
+This document is **structural and architectural only**.
+
+It deliberately does **not** define:
+- Numeric values
+- Caps or balance
+- Progression rules
+- Combat math
+- Item stats
+
+All such rules live in their respective authoritative documents.
 
 ---
 
 ## DESIGN LOCKS (ABSOLUTE)
 
 1. **Server-authoritative state**
-   - The server is the source of truth for: vitals, stats, inventory, equipment state, skill progression, status effects, damage, death.
+   - The server is the sole authority for all gameplay-affecting state.
 
 2. **No classes / no levels / no XP**
-   - Progression only occurs through **skills increasing via use**.
+   - Progression is strictly **skill-based**.
 
 3. **Status effects are decoupled from items**
-   - Items may *apply* or *grant* effects, but **Status Effects are defined and resolved independently**.
+   - Items may apply or grant statuses, but **status behavior is defined and resolved independently**.
 
-4. **Deterministic math**
-   - Combat and effect resolution is numeric and reproducible.
+4. **Deterministic resolution**
+   - All gameplay outcomes must be reproducible from deterministic inputs.
+
+---
+
+## SCOPE BOUNDARIES (NO OVERLAP)
+
+### This document **owns**:
+- Player-as-Actor definition
+- Runtime component responsibilities
+- Authority & replication rules
+- High-level integration contracts between systems
+
+### This document **does NOT own**:
+- Player baselines, caps, or starting values *(see `PLAYER_DEFINITION.md`)*
+- Combat rules or formulas *(see `COMBAT_CORE.md`)*
+- Stat aggregation logic *(see `PLAYER_COMBAT_STATS.md`)*
+- Skill identifiers *(see `SKILL_ID_CATALOG.md`)*
+- Item schemas or lists *(see `ITEM_DEF_SCHEMA.md`, `ITEM_CATALOG.md`)*
+- Status semantics *(see `STATUS_EFFECT_CATALOG.md`)*
+
+If a rule is not explicitly structural, it does **not** belong here.
 
 ---
 
 ## PLAYER = ACTOR
 
-A Player is an **Actor** with:
-- A network identity (owner client)
-- A runtime state container (vitals, inventory, status, etc.)
-- Input driving intents (move / interact / attack), validated server-side
+A **Player** is a specialized **Actor** that:
+- Is network-owned by a single client
+- Exists in a persistent multiplayer world
+- Issues *intents* (never direct actions)
+- Has all gameplay state validated and mutated by the server
 
-### Components (Unity)
-- `PlayerNetIdentity` (NGO ownership, server authority bindings)
-- `PlayerCore` (authoritative runtime references)
-- `PlayerVitals` (HP/Stam/Mana + regen rules)
-- `PlayerStats` (attributes + derived stats)
-- `PlayerSkillBook` (skill values + gain rules)
-- `InventoryComponent` (bag, weight, stacks, containers)
-- `EquipmentComponent` (hands/armor/jewelry slots, if used)
-- `StatusEffectSystem` (applied statuses, ticking, stacking)
-- `TargetingComponent` (current target; server-validated actions)
-
-> NOTE: Exact script names can match your existing conventions; this doc defines the *contract*.
+The Player is **not privileged**.
+NPCs, enemies, and summons follow the same Actor rules where applicable.
 
 ---
 
-## DATA OWNERSHIP & REPLICATION (NGO)
+## RUNTIME COMPONENT MODEL
 
-### Authoritative on Server
-- Current vitals (HP/Stam/Mana)
-- Stat block (attributes + derived stats)
-- Skill values + gain ticks
-- Inventory contents + container topology
+The Player Actor is composed of modular, server-authoritative components.
+
+> Exact class names may vary; this list defines the **required responsibilities**, not the exact implementation.
+
+### Core Identity & Authority
+
+- **PlayerNetIdentity**
+  - NGO ownership
+  - Local vs remote player detection
+  - Server authority enforcement
+
+- **PlayerCore**
+  - Central runtime hub
+  - Binds and exposes authoritative subsystems
+  - Initializes server-only systems
+
+---
+
+### Attributes, Vitals & Skills
+
+- **PlayerStats**
+  - Holds primary attributes
+  - Applies modifiers from items and statuses
+  - Exposes *effective* values only
+
+- **PlayerVitals**
+  - Holds current/max vitals
+  - Applies regen and damage
+  - Exposes vitals to Combat Core
+
+- **PlayerSkillBook**
+  - Holds skill values and lock states
+  - Receives gain/loss requests from progression systems
+
+> Numeric derivation, caps, and progression rules are defined in `PLAYER_DEFINITION.md` and `PROGRESSION.md`.
+
+---
+
+### Inventory & Equipment
+
+- **InventoryComponent**
+  - Container graph (bags within bags)
+  - Stack handling and weight calculation
+
+- **EquipmentComponent**
+  - Manages equipped ItemInstances
+  - Enforces slot and handedness rules
+  - Exposes equipped items to stat aggregation
+
+> Item identity, schema, and base values are defined in item system documents.
+
+---
+
+### Status Effects
+
+- **StatusEffectSystem**
+  - Applies, refreshes, stacks, and removes statuses
+  - Ticks timed effects
+  - Exposes action gates and modifiers
+
+Status behavior and semantics are defined exclusively in `STATUS_EFFECT_CATALOG.md`.
+
+This system **never** executes combat logic.
+
+---
+
+### Targeting & Interaction
+
+- **TargetingComponent**
+  - Tracks the player’s current target
+  - Exposes validated target references
+
+- **InteractionComponent**
+  - Submits interaction intents
+  - Server validates range, legality, and ownership
+
+---
+
+## AUTHORITY & REPLICATION MODEL
+
+### Server-Authoritative State
+
+The server is the sole writer for:
+- Vitals (current and max)
+- Attributes and derived stats
+- Skill values and lock states
+- Inventory contents and container topology
 - Equipped items
 - Active status effects
-- Position / rotation (via NetworkTransform or custom)
-
-### Predicted on Client (Optional)
-- Local movement smoothing
-- UI selection/hover state
-- Cosmetic-only feedback
-
-### Replicated to Clients
-- Public-facing vitals (HP % for others, optional)
-- Combat events (hit/miss/damage numbers)
-- Status visuals (icons/particles; actual logic stays server)
+- Currency balances
+- Death and respawn state
 
 ---
 
-## BASELINE PLAYER STATS (PROPOSED)
+### Client Responsibilities
 
-### Primary Attributes
-These are the only "root" attributes. Everything else derives from them.
-- **STR** (Strength)
-- **DEX** (Dexterity)
-- **INT** (Intelligence)
+Clients are limited to:
+- Submitting input intents
+- Rendering UI and visuals
+- Cosmetic-only prediction (optional)
 
-### Vitals
-- **HP** (Hit Points)
-- **Stamina**
-- **Mana**
-
-### Core Derived Combat Stats (minimal set)
-- **Hit Chance**
-- **Defense Chance**
-- **Swing Speed**
-- **Base Damage**
-- **Damage Increase**
-
-### Resistances (damage mitigation channels)
-- **Physical**
-- **Fire**
-- **Cold**
-- **Poison**
-- **Energy**
-
-### Caps (Proposed, not locked)
-- Resistance max cap defaults to **70** (UO-like), unless overridden by world rules.
+Clients **never**:
+- Modify gameplay state
+- Roll RNG
+- Apply damage or healing
 
 ---
 
-## SKILLS (FOUNDATION SET)
+### Replication
 
-This is the *minimum* set to start building combat + gathering + crafting.
-
-### Combat
-- Swords
-- Macing
-- Fencing
-- Archery
-- Wrestling
-- Tactics
-- Anatomy
-- Parrying
-
-### Magic (choose one model; see Open Questions)
-- Magery
-- Meditation
-- Evaluating Intelligence
-- Resist Spells
-
-### Utility / World
-- Healing
-- Hiding
-- Stealth
-- Lockpicking
-
-### Crafting (stub OK initially)
-- Blacksmithing
-- Tailoring
-- Carpentry
-- Alchemy
-
-> You can start with Combat + Utility only, and add Crafting later; the data model supports both.
+The following are replicated to clients as read-only data:
+- Vitals snapshots
+- Skill values
+- Attribute summaries
+- Combat events
+- Status visuals (icons, VFX triggers)
 
 ---
 
-## INVENTORY & EQUIPMENT MODEL
+## STATUS EFFECT INTEGRATION CONTRACT
 
-### Inventory
-- Inventory is a **container graph** (bag contains items; items can be containers).
-- Each item has:
-  - `ItemId` (unique instance)
-  - `DefinitionId` (points to an ItemDef/ScriptableObject)
-  - `StackCount` (if stackable)
-  - `Weight` (per unit)
-  - `PropertyRolls` (random affixes/properties)
+The Player Actor must expose a status receiver interface that allows:
+- Querying action gates (movement, attack, casting, bandaging)
+- Applying periodic effects (DoT, HoT)
+- Applying modifiers (speed, swing time, cast time)
 
-### Encumbrance
-- Total carried weight affects:
-  - Movement speed (optional)
-  - Stamina regen (optional)
-  - Action cost (optional)
-
-### Equipment (Proposed slots)
-- **Hands**: MainHand, OffHand (supports 2-hand items)
-- **Armor**: Head, Chest, Legs, Hands, Feet
-- **Jewelry**: Ring1, Ring2, Necklace
-
-> If you want more UO authenticity (layers), we can expand this later without breaking save data.
+Status execution is handled by consuming systems (Combat, Movement), not by the Player itself.
 
 ---
 
-## STATUS EFFECT INTEGRATION
+## DEATH & RESPAWN (STRUCTURAL ONLY)
 
-Players must be valid targets for any status effect in the catalog.
+This document defines **when** death occurs, not **what happens**.
 
-### Runtime Requirements
-- Player must expose a `StatusReceiver` interface:
-  - Apply / refresh / stack / remove
-  - Query immunities/resistances
-  - Provide hooks for:
-    - movement restrictions
-    - action blocking
-    - damage over time
-    - regen modifiers
+- When HP reaches zero, the Player enters a Dead state
+- Combat Core triggers death exactly once
+- Death handling is delegated to the death/loot pipeline
+
+> Loot loss, insurance, corpse creation, and currency rules are owned by `PLAYER_DEFINITION.md`.
 
 ---
 
-## DEATH & RESPAWN (PROPOSED)
+## IMPLEMENTATION GUARANTEES
 
-- At **HP <= 0**: Player enters **Dead** state.
-- On death:
-  - Drop loot? (Open Question)
-  - Durability damage? (Open Question)
-  - Corpse container created server-side? (Open Question)
+With this model locked:
+- Combat systems can rely on stable interfaces
+- Status effects can be added without refactors
+- Item systems remain decoupled
+- Progression laws remain enforceable
 
----
-
-## LOCKED DECISIONS (CONFIRMED)
-
-The following decisions are **locked** and must not be violated by implementation.
-
-### Starting Stats
-- Fixed baseline: **STR 10 / DEX 10 / INT 10**
-
-### Skill Caps
-- **Total Skill Cap (UO-style): 700**
-- Individual skills increase by use
-- Global cap enforces tradeoffs and respecialization pressure
-
-### Magic Model
-- **Ultima Online–style spellbook + reagents**
-- Spell knowledge gated by scroll acquisition
-- Casting consumes reagents and mana
-
-### Death Penalty
-- **Full Loot on Death**
-- Corpse container created server-authoritative
-- Items may be protected via **Item Insurance** (LOCKED RULES BELOW)
-
-#### Item Insurance (LOCKED)
-- **Optional per-item** insurance toggle.
-- **Paid up-front** when insurance is applied.
-- Optional **Auto-Renew** per item:
-  - On death, if Auto-Renew is enabled and the player has sufficient funds, the server **withdraws gold from the player’s bank** and **re-applies insurance** automatically.
-  - If insufficient funds, Auto-Renew fails and the item is treated as uninsured for that death.
-
-### Equipment Layers (LOCKED)
-
-#### Armor / Wearables
-- Head
-- Torso
-- Arms
-- Hands
-- Legs
-- **Neck (Armor):** Gorget / Scarf / neck-armor layer
-
-#### Jewelry
-- **Amulet** (separate from Neck armor)
-- **Rings:** Ring1, Ring2
-- **Earrings**
-
-#### Weapons
-- Main Hand
-- Off Hand
-- Two-Handed (occupies both)
+This document must remain **numerically empty**.
 
 ---
 
-## UPDATED IMPLEMENTATION CHECKLIST (NEXT)
+## DESIGN LOCK CONFIRMATION
 
-The following systems are now unblocked and should be implemented **in order**:
+This document is **authoritative for player architecture only**.
 
-1. **PlayerDefinition** *(ScriptableObject)*
-   - Starting stats (10/10/10)
-   - Total skill cap
-   - Starting skills (likely 0 or minimal)
-
-2. **PlayerCore** *(MonoBehaviour)*
-   - Central authoritative reference hub
-   - Holds references to all sub-systems
-
-3. **PlayerVitals** *(Server-authoritative)*
-   - HP / Stamina / Mana
-   - Regen rules + hooks for status effects
-
-4. **PlayerStats**
-   - Attributes → derived combat stats
-   - Resistance caps + modifiers
-
-5. **PlayerSkillBook**
-   - Skill values
-   - Skill gain ticks
-   - Enforcement of total skill cap
-
-6. **Corpse & Loot Container System**
-   - Server-spawned corpse
-   - Inventory transfer
-   - Insurance exemptions
-
-7. **Read-only UI Binders**
-   - Vitals panel
-   - Skill list panel
-   - Equipment paperdoll (no interaction yet)
-
----
-
-## ITEM INSURANCE SYSTEM (LOCKED)
-
-Insurance is **optional for all items** and fully server-authoritative.
-
-### Insurance Rules
-1. **Upfront Purchase**
-   - Insurance is purchased in advance per item.
-   - Cost is paid immediately and stored on the item instance.
-
-2. **Auto-Renew (Optional Flag)**
-   - Items may enable `AutoRenewInsurance`.
-
-3. **On Death Resolution**
-   - If the item is insured:
-     - The item is **not transferred to the corpse**.
-     - Insurance is considered consumed.
-   - If **Auto-Renew** is enabled:
-     - Server attempts to withdraw insurance cost from the player **bank**.
-     - If funds are available → insurance is reapplied.
-     - If funds are insufficient → item becomes uninsured.
-
-4. **Failure Case**
-   - Uninsured items are fully lootable.
-
-### Data Requirements
-- Item Instance Fields:
-  - `IsInsured`
-  - `InsuranceCost`
-  - `AutoRenewInsurance`
-
----
-
-## DESIGN NOTE (IMPORTANT)
-
-With these locks in place:
-- Combat math
-- Status effects
-- Item affixes
-- Skill gain
-- Insurance rules
-
-can now be implemented **without refactors**.
-
-This Player model is now stable enough to be treated as **authoritative source-of-truth**.
+Any change must:
+- Increment Version
+- Update Last Updated
+- Declare impacted dependent documents
 
