@@ -1,246 +1,203 @@
 # ITEM_CATALOG.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.0  
-Last Updated: 2026-01-28  
+Version: 1.1  
+Last Updated: 2026-01-29  
 Engine: Unity 6 (URP)  
+Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
-Data: ScriptableObjects-first (`ItemDef` + Catalog)
 
 ---
 
 ## PURPOSE
 
-Defines the **authoritative base item list** for *Ultimate Dungeon*.
+Defines the authoritative list of **all ItemIds** used in *Ultimate Dungeon*.
 
-This document is the single source of truth for:
-- The stable list of **ItemDefIds** (append-only)
-- Each item’s **base values** (weapon damage/swing, armor base resists, durability max, weight, stack rules)
-- Material/slot base resist profiles (Cloth / Leather / Metal) and how they are authored into items
+This document:
+- Locks **stable identity** (ItemId strings)
+- Does **not** define balance, stats, or behavior
+- Is referenced by ItemDefs, loot tables, crafting, housing, combat, and magic systems
 
-This document does **not**:
-- Define the ItemDef field schema (owned by `ITEM_DEF_SCHEMA.md`)
-- Define affix IDs, tiers, stacking, or ranges (owned by `ITEM_AFFIX_CATALOG.md`)
-- Define item system laws (owned by `ITEMS.md`)
+If an ItemId is not defined here, it **does not exist**.
 
 ---
 
 ## DESIGN LOCKS (MUST ENFORCE)
 
-1. **Stable IDs (append-only)**
-   - Never reorder or rename shipped ItemDefIds.
-   - Only append new entries.
+1. **ItemIds are permanent**
+   - Never reuse an ItemId
+   - Retired ItemIds remain reserved forever
 
-2. **Base values live here**
-   - Any “base” weapon/armor stats must be authored here (and mirrored in ItemDef assets).
+2. **No balance data in this file**
+   - Stack size, weight, durability, and rules live in `ItemDef` assets
 
-3. **Material resist profiles are locked**
-   - Cloth/Leather/Metal baseline intent is defined here.
-
-4. **Jewelry durability is enabled**
-
-5. **Archery/ammo is separate item family**
-   - Bows/crossbows + arrows/bolts.
+3. **Single source of identity**
+   - All systems must reference ItemIds from this catalog only
 
 ---
 
-## CATALOG VS ASSETS (LOCKED WORKFLOW)
+## ITEM ID PREFIX CONVENTIONS (LOCKED)
 
-- **This catalog** is the human-readable authoritative list.
-- **ItemDef assets** are the runtime data.
-
-**Rule:** Every row in this catalog must have exactly one matching `ItemDef` asset with:
-- `itemDefId` equal to this catalog id
-- Fields populated according to `ITEM_DEF_SCHEMA.md`
-
-An editor validator must enforce:
-- Missing ItemDef assets
-- Duplicate ids
-- Asset values not matching catalog values
-
----
-
-## MATERIAL BASE RESIST PROFILES (LOCKED)
-
-These profiles represent the **intended baseline** per material.
-Exact per-slot values are authored in the base item entries.
-
-### Cloth (baseline intent)
-- Very low Physical
-- Low/variable elemental resists
-- No DEX penalty
-
-### Leather (baseline intent)
-- Moderate Physical
-- Moderate elemental resists
-- Low/none DEX penalty
-
-### Metal (baseline intent)
-- High Physical
-- Moderate elemental resists
-- Possible DEX penalty
-
-> Final numeric per-piece values are authored below per item.
+| Prefix | Meaning |
+|---|---|
+| `ITEM_RES_` | Raw / processed resources |
+| `ITEM_GEM_` | Gems & rare materials |
+| `ITEM_REG_` | Alchemical reagents |
+| `ITEM_ESS_` | Magical essences |
+| `ITEM_COL_` | Special / lore collectables |
+| `ITEM_MAT_` | Crafting & enhancement materials |
+| `ITEM_WPN_` | Weapons |
+| `ITEM_ARM_` | Armor |
+| `ITEM_JEW_` | Jewelry |
+| `ITEM_CON_` | Consumables |
+| `ITEM_TOL_` | Tools |
+| `ITEM_MISC_` | Miscellaneous |
 
 ---
 
-## BASE ITEM LIST (AUTHORITATIVE)
+## RESOURCES (AUTHORITATIVE ITEM IDS)
 
-> **IMPORTANT:** Append-only. Do not reorder.
->
-> Columns here map directly to fields in `ITEM_DEF_SCHEMA.md`.
+> Identity-only list.  
+> Meaning, sourcing, and usage are defined in `RESOURCE_AND_COLLECTABLE_CATALOG.md`.
 
-### Column Key
-- **Family**: Weapon / Armor / Shield / Jewelry / Consumable / Reagent / Resource / Container
-- **DurMax**: durabilityMax (if usesDurability)
-- **Stack**: stackMax (if isStackable)
+### Raw Materials — Wood & Plant
+- ITEM_RES_WoodLog
+- ITEM_RES_HardwoodLog
+- ITEM_RES_AncientWoodLog
+- ITEM_RES_WoodenBranch
+- ITEM_RES_Bark
+- ITEM_RES_PlantFiber
+- ITEM_RES_Vines
+- ITEM_RES_Thatch
 
----
+### Raw Materials — Stone & Earth
+- ITEM_RES_StoneChunk
+- ITEM_RES_SmoothStone
+- ITEM_RES_GraniteBlock
+- ITEM_RES_LimestoneBlock
+- ITEM_RES_Clay
+- ITEM_RES_Sand
+- ITEM_RES_Gravel
 
-## WEAPONS — MELEE (AUTHORITATIVE)
+### Raw Materials — Water & Fluids
+- ITEM_RES_FreshWater
+- ITEM_RES_BrackishWater
+- ITEM_RES_PureWater
+- ITEM_RES_LavaSample
 
-| ItemDefId | Name | Hand | Skill | Dmg (Min–Max) | Swing (s) | Stam | Type | Range | DurMax | Weight |
-|---|---|---|---|---:|---:|---:|---|---:|---:|---:|
-| weapon_sword_short | Short Sword | MainHand | Swords | 4–8 | 2.25 | 4 | Physical | 2.0 | 60 | 5.0 |
-| weapon_sword_long | Long Sword | MainHand | Swords | 6–12 | 2.75 | 5 | Physical | 2.0 | 70 | 6.0 |
-| weapon_mace_club | Club | MainHand | Macing | 4–9 | 2.50 | 4 | Physical | 2.0 | 65 | 6.0 |
-| weapon_mace_warhammer | War Hammer | TwoHanded | Macing | 10–18 | 3.25 | 7 | Physical | 2.0 | 80 | 10.0 |
-| weapon_fence_spear | Spear | TwoHanded | Fencing | 8–14 | 3.00 | 6 | Physical | 2.0 | 75 | 8.0 |
-| weapon_fence_dagger | Dagger | MainHand | Fencing | 3–7 | 2.00 | 3 | Physical | 2.0 | 55 | 2.0 |
+### Processed Materials — Wood
+- ITEM_RES_WoodenPlank
+- ITEM_RES_HardwoodPlank
+- ITEM_RES_TreatedTimber
+- ITEM_RES_Charcoal
 
-> Notes:
-> - Range defaults to Combat Core melee range if omitted; included here for clarity.
-> - Exact balance is tunable; the schema and ownership are locked.
+### Processed Materials — Stone
+- ITEM_RES_StoneBlock
+- ITEM_RES_CutStoneBlock
+- ITEM_RES_Mortar
 
----
+### Processed Materials — Metal Intermediates
+- ITEM_RES_MetalScrap
 
-## WEAPONS — RANGED (AUTHORITATIVE)
+### Organic Materials — Hides & Leather
+- ITEM_RES_RawHide
+- ITEM_RES_CuredLeather
+- ITEM_RES_ThickLeather
+- ITEM_RES_ScaledHide
 
-| ItemDefId | Name | Hand | Skill | Dmg (Min–Max) | Swing (s) | Stam | Type | Ammo | Range | DurMax | Weight |
-|---|---|---|---|---:|---:|---:|---|---|---:|---:|---:|
-| weapon_archery_bow | Bow | TwoHanded | Archery | 6–12 | 2.75 | 5 | Physical | Arrow | 12.0 | 65 | 6.0 |
-| weapon_archery_crossbow | Crossbow | TwoHanded | Archery | 8–14 | 3.25 | 6 | Physical | Bolt | 12.0 | 70 | 7.0 |
+### Organic Materials — Bone & Flesh
+- ITEM_RES_Bone
+- ITEM_RES_BoneShard
+- ITEM_RES_Skull
+- ITEM_RES_FreshMeat
+- ITEM_RES_PreservedMeat
+- ITEM_RES_Fat
 
----
+### Monster Components
+- ITEM_RES_MonsterClaw
+- ITEM_RES_MonsterFang
+- ITEM_RES_MonsterEye
+- ITEM_RES_MonsterHeart
+- ITEM_RES_MonsterBlood
+- ITEM_RES_ChitinPlate
+- ITEM_RES_VenomSac
+- ITEM_RES_EssenceGland
 
-## AMMUNITION (AUTHORITATIVE)
+### Ores (Unrefined)
+- ITEM_RES_IronOre
+- ITEM_RES_CopperOre
+- ITEM_RES_TinOre
+- ITEM_RES_SilverOre
+- ITEM_RES_GoldOre
+- ITEM_RES_ObsidianOre
+- ITEM_RES_MythrilOre
+- ITEM_RES_AdamantiteOre
 
-| ItemDefId | Name | Family | Stack | Weight |
-|---|---|---|---:|---:|
-| ammo_arrow | Arrow | Resource | 100 | 0.02 |
-| ammo_bolt | Bolt | Resource | 100 | 0.02 |
+### Refined Metals
+- ITEM_RES_IronIngot
+- ITEM_RES_CopperIngot
+- ITEM_RES_BronzeIngot
+- ITEM_RES_SteelIngot
+- ITEM_RES_SilverIngot
+- ITEM_RES_GoldIngot
+- ITEM_RES_MythrilIngot
+- ITEM_RES_AdamantiteIngot
 
-> Ammo is consumed by Combat Core: 1 per attack attempt.
+### Gems & Rares — Common
+- ITEM_GEM_Quartz
+- ITEM_GEM_Amber
+- ITEM_GEM_Garnet
 
----
+### Gems & Rares — Uncommon
+- ITEM_GEM_Sapphire
+- ITEM_GEM_Ruby
+- ITEM_GEM_Emerald
+- ITEM_GEM_Topaz
 
-## ARMOR — CLOTH (AUTHORITATIVE)
+### Gems & Rares — Legendary
+- ITEM_GEM_Diamond
+- ITEM_GEM_VoidCrystal
+- ITEM_GEM_Dragonstone
+- ITEM_GEM_SoulGem_Empty
+- ITEM_GEM_SoulGem_Filled
 
-| ItemDefId | Name | Material | Slot | P | F | C | Po | E | DexPen | DurMax | Weight |
-|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| armor_cloth_cap | Cloth Cap | Cloth | Head | 1 | 1 | 1 | 0 | 1 | 0 | 35 | 1.0 |
-| armor_cloth_tunic | Cloth Tunic | Cloth | Torso | 2 | 1 | 1 | 1 | 1 | 0 | 45 | 2.0 |
-| armor_cloth_leggings | Cloth Leggings | Cloth | Legs | 2 | 1 | 1 | 1 | 1 | 0 | 40 | 2.0 |
+### Alchemical Reagents
+- ITEM_REG_BlackPearl
+- ITEM_REG_BloodMoss
+- ITEM_REG_Garlic
+- ITEM_REG_Ginseng
+- ITEM_REG_MandrakeRoot
+- ITEM_REG_Nightshade
+- ITEM_REG_SpiderSilk
+- ITEM_REG_SulfurousAsh
 
----
+### Magical Essences
+- ITEM_ESS_Arcane
+- ITEM_ESS_Elemental_Fire
+- ITEM_ESS_Elemental_Water
+- ITEM_ESS_Elemental_Air
+- ITEM_ESS_Elemental_Earth
+- ITEM_ESS_Shadow
+- ITEM_ESS_Light
+- ITEM_ESS_Corrupted
 
-## ARMOR — LEATHER (AUTHORITATIVE)
+### Environmental & Special Collectables
+- ITEM_COL_AncientCoinRelic
+- ITEM_COL_RuinedArtifactFragment
+- ITEM_COL_DungeonKeyFragment
+- ITEM_COL_MapFragment
+- ITEM_COL_RuneFragment
 
-| ItemDefId | Name | Material | Slot | P | F | C | Po | E | DexPen | DurMax | Weight |
-|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| armor_leather_cap | Leather Cap | Leather | Head | 2 | 2 | 1 | 1 | 1 | 0 | 45 | 1.5 |
-| armor_leather_tunic | Leather Tunic | Leather | Torso | 3 | 2 | 2 | 1 | 1 | 0 | 55 | 3.0 |
-| armor_leather_gloves | Leather Gloves | Leather | Hands | 2 | 1 | 1 | 1 | 1 | 0 | 40 | 1.0 |
-
----
-
-## ARMOR — METAL (AUTHORITATIVE)
-
-| ItemDefId | Name | Material | Slot | P | F | C | Po | E | DexPen | DurMax | Weight |
-|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| armor_metal_helm | Iron Helm | Metal | Head | 4 | 2 | 2 | 1 | 1 | -1 | 60 | 4.0 |
-| armor_metal_chest | Iron Chest | Metal | Torso | 6 | 3 | 2 | 2 | 2 | -2 | 75 | 8.0 |
-| armor_metal_leggings | Iron Leggings | Metal | Legs | 5 | 2 | 2 | 2 | 2 | -2 | 70 | 7.0 |
-
----
-
-## SHIELDS (AUTHORITATIVE)
-
-| ItemDefId | Name | BlockType | DurMax | Weight |
-|---|---|---|---:|---:|
-| shield_buckler | Buckler | Basic | 60 | 4.0 |
-| shield_kite | Kite Shield | Heavy | 80 | 7.0 |
-
----
-
-## JEWELRY (AUTHORITATIVE)
-
-| ItemDefId | Name | Slot | DurMax | Weight |
-|---|---|---|---:|---:|
-| jewel_amulet_plain | Plain Amulet | Amulet | 40 | 0.5 |
-| jewel_ring_plain | Plain Ring | Ring | 35 | 0.2 |
-| jewel_earrings_plain | Plain Earrings | Earrings | 35 | 0.2 |
-
-> Jewelry has no base resists; durability is enabled.
-
----
-
-## CONSUMABLES (AUTHORITATIVE)
-
-| ItemDefId | Name | Type | Stack | UseTime (s) | Weight |
-|---|---|---|---:|---:|---:|
-| consumable_bandage | Bandage | Bandage | 50 | 0.0 | 0.05 |
-
----
-
-## REAGENTS (AUTHORITATIVE)
-
-| ItemDefId | Name | Stack | Weight |
-|---|---|---:|---:|
-| reagent_black_pearl | Black Pearl | 100 | 0.02 |
-| reagent_blood_moss | Blood Moss | 100 | 0.02 |
-| reagent_garlic | Garlic | 100 | 0.02 |
-| reagent_ginseng | Ginseng | 100 | 0.02 |
-| reagent_mandrake_root | Mandrake Root | 100 | 0.02 |
-| reagent_nightshade | Nightshade | 100 | 0.02 |
-| reagent_spiders_silk | Spider's Silk | 100 | 0.02 |
-| reagent_sulfurous_ash | Sulfurous Ash | 100 | 0.02 |
-
----
-
-## RESOURCES (AUTHORITATIVE)
-
-| ItemDefId | Name | Stack | Weight |
-|---|---|---:|---:|
-| resource_ore_iron | Iron Ore | 50 | 0.5 |
-| resource_ingot_iron | Iron Ingot | 50 | 0.3 |
-| resource_leather | Leather | 50 | 0.2 |
-| resource_cloth | Cloth | 50 | 0.2 |
-
----
-
-## CONTAINERS (AUTHORITATIVE)
-
-| ItemDefId | Name | Slots | AllowNested | DurMax | Weight |
-|---|---|---:|---|---:|---:|
-| container_backpack | Backpack | 30 | true | 50 | 2.0 |
-| container_pouch | Pouch | 10 | true | 35 | 1.0 |
+### Crafting & Enhancement Materials
+- ITEM_MAT_InscriptionScrollBlank
+- ITEM_MAT_EnchantmentDust
+- ITEM_MAT_RunicPowder
+- ITEM_MAT_SoulAsh
 
 ---
 
-## VALIDATION CHECKLIST (LOCKED)
+## RETIRED / RESERVED ITEM IDS
 
-An editor validator must ensure:
-- Every `ItemDefId` here has a matching `ItemDef` asset
-- Every `ItemDef` asset uses this catalog’s base values
-- No duplicates
-- Append-only changes for shipped content
-
----
-
-## OPEN QUESTIONS (PROPOSED — NOT LOCKED)
-
-- Full expansion of the base catalog (more weapons/armor variants)
-- Balance pass across damage/swing/durability/weights
+- None (v1.1)
 
 ---
 
@@ -251,5 +208,4 @@ This document is **authoritative**.
 Any change must:
 - Increment Version
 - Update Last Updated
-- Call out save-data implications (new ids affect serialization)
-
+- Call out impacted systems (Items, Loot, Crafting, Housing, Magic)
