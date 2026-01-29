@@ -1,21 +1,23 @@
 # COMBAT_CORE.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.4  
+Version: 1.5  
 Last Updated: 2026-01-29  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
-Determinism: Required (server-seeded)
+Determinism: Required (server-seeded)  
 
 ---
 
 ## PURPOSE
 
-Defines the **authoritative Combat Core** for *Ultimate Dungeon*, fully aligned with **ACTOR_MODEL.md**.
+Defines the **authoritative Combat Core** for *Ultimate Dungeon*, aligned with:
+- `ACTOR_MODEL.md` (Actors, legality, factions, **SceneRuleContext**)
+- `TARGETING_MODEL.md` (intent validation and scene gating)
 
 Combat Core is responsible for **how combat is executed**, not **whether combat is legal**.
 
-It consumes validated Actor relationships, combat legality, and combat state from the Actor layer and executes:
+Combat Core executes:
 - Swing timers
 - Hit / miss resolution
 - Damage application
@@ -32,12 +34,14 @@ If a combat rule is not defined here, **it does not exist**.
 - Combat execution order
 - Server scheduling model (swing timers, bandage timers)
 - Deterministic RNG usage
-- DamagePacket / HealPacket resolution
+- `DamagePacket` / `HealPacket` resolution
 - Durability loss triggers
 - Death trigger and handoff
 
 ### This document does NOT own
 - Actor identity, faction, hostility, PvP legality *(see `ACTOR_MODEL.md`)*
+- Scene rule definitions *(see `ACTOR_MODEL.md`)*
+- Target intent validation *(see `TARGETING_MODEL.md`)*
 - Player baselines and caps *(see `PLAYER_DEFINITION.md`)*
 - Combat stat aggregation *(see `PLAYER_COMBAT_STATS.md`)*
 - Status definitions *(see `STATUS_EFFECT_CATALOG.md`)*
@@ -64,8 +68,33 @@ If a combat rule is not defined here, **it does not exist**.
 5. **PvE and PvP share rules**
    - The same execution pipeline is used once legality is confirmed.
 
-6. **Status-first integrity**
+6. **Scene rules are hard gates**
+   - If a scene disallows combat/damage/death/durability, Combat Core must not schedule or resolve those outcomes.
+
+7. **Status-first integrity**
    - Combat respects action gates and modifiers derived from status effects.
+
+---
+
+## DEPENDENCY: SCENE RULE CONTEXT (MANDATORY)
+
+Combat Core must consume **SceneRuleFlags** derived from `SceneRuleContext` (see `ACTOR_MODEL.md`).
+
+### Required flags
+- `CombatAllowed`
+- `DamageAllowed`
+- `DeathAllowed`
+- `DurabilityLossAllowed`
+
+**Design lock:** If `CombatAllowed == false`, Combat Core must refuse:
+- Scheduling any swing timers
+- Resolving any hit/miss rolls
+- Creating any `DamagePacket` from weapon attacks
+
+**Design lock:** If `DamageAllowed == false`, Combat Core must refuse:
+- Applying any damage (even if a timer was scheduled by mistake)
+
+This double-gate prevents exploits caused by miswired client/UI or stale timers.
 
 ---
 
@@ -74,27 +103,27 @@ If a combat rule is not defined here, **it does not exist**.
 ### Actor
 A runtime entity defined by `ACTOR_MODEL.md` that:
 - Has `ActorType`, `FactionId`, and `CombatState`
-- Can be targeted and damaged
-- May die
+- Can be targeted and damaged (depending on scene + legality)
+- May die (depending on scene)
 
 Combat Core **never** decides hostility or PvP rules.
 
 ---
 
 ### CombatState
-Server-authoritative gameplay state defined in `ACTOR_MODEL.md`.
+Server-authoritative state defined in `ACTOR_MODEL.md`.
 
 Combat Core must:
 - Refuse actions from `CombatState.Dead`
 - Notify the CombatStateTracker on hostile actions
 - Never infer combat state implicitly
 
+**Scene lock:** In safe scenes, an Actor may never transition into `InCombat`.
+
 ---
 
 ### DamagePacket
 A single atomic damage request produced by combat execution.
-
----
 
 ### HealPacket
 A single atomic healing request produced by bandaging or spells.
@@ -108,13 +137,15 @@ Combat Core consumes a **validated snapshot**:
 - Attacker Actor
 - Target Actor
 - Aggregated combat stats (from `PLAYER_COMBAT_STATS.md` or equivalent)
+- SceneRuleFlags (from `ACTOR_MODEL.md`)
 
 Combat Core must **not**:
 - Decide whether the target is hostile
 - Decide PvP legality
 - Decide whether an actor *should* be attackable
+- Decide whether a scene allows combat
 
-Those decisions are resolved **before** combat scheduling via `ACTOR_MODEL.md`.
+Those decisions are resolved **before** Combat Core scheduling.
 
 ---
 
@@ -122,6 +153,7 @@ Those decisions are resolved **before** combat scheduling via `ACTOR_MODEL.md`.
 
 Before scheduling or resolving any combat action, the server must validate:
 
+- Scene: `CombatAllowed == true`
 - Attacker Actor is alive and not `CombatState.Dead`
 - Target Actor is alive and eligible
 - `AttackLegalityResult == Allowed` (from Actor rules)
@@ -187,6 +219,10 @@ Aggregation policies are owned by `PLAYER_COMBAT_STATS.md`.
 
 When a swing timer completes:
 
+0. **Scene re-gate (mandatory)**
+   - If `CombatAllowed == false` → cancel resolution
+   - If `DamageAllowed == false` → cancel damage creation
+
 1. **Revalidate**
    - Attacker and target still alive
    - Target still eligible
@@ -208,11 +244,23 @@ When a swing timer completes:
    - Emit `DamagePacket`
    - Resolve on-hit procs
    - Resolve hit leaches
-   - Apply durability loss
+   - Apply durability loss *(only if `DurabilityLossAllowed == true`)*
    - Emit `Hit` event
 
-6. **Death check**
-   - If HP ≤ 0 → trigger death exactly once
+6. **Death check (scene-gated)**
+   - If `DeathAllowed == false` → do not kill; clamp at minimum HP (implementation policy)
+   - If `DeathAllowed == true` and HP ≤ 0 → trigger death exactly once
+
+---
+
+## DURABILITY LOSS (SCENE-GATED LOCK)
+
+Durability loss is only allowed if:
+- `DurabilityLossAllowed == true`
+
+If the scene disallows durability loss, Combat Core must:
+- Skip durability reduction triggers
+- Still allow non-damage actions only if scene allows them (usually not relevant in safe scenes)
 
 ---
 
@@ -231,7 +279,8 @@ Combat Core never inspects individual status effects directly.
 
 On any successful hostile action:
 - Combat Core must notify the **CombatStateTracker**
-- CombatState transitions are handled outside Combat Core
+
+**Scene lock:** This notification must never occur in safe scenes (because hostile actions cannot be legal).
 
 Combat Core does **not**:
 - Track aggression timers
@@ -241,7 +290,7 @@ Combat Core does **not**:
 
 ## DEATH HANDOFF (LOCKED)
 
-When an Actor reaches 0 HP:
+When an Actor reaches 0 HP (and `DeathAllowed == true`):
 
 - Combat Core emits `OnActorKilled(attacker, target, context)`
 - Combat Core never performs loot, insurance, or respawn logic
@@ -270,6 +319,7 @@ Clients never receive authority to resolve combat.
 3. `DamagePacket` / `HealPacket` models
 4. `CombatStateTracker` (server)
 5. Actor legality integration (`AttackLegalityResult`)
+6. Scene rule provider integration (Combat Core must be handed `SceneRuleFlags`)
 
 ---
 
@@ -280,4 +330,5 @@ This document is **authoritative**.
 Any change must:
 - Increment Version
 - Update Last Updated
-- Call out impacted dependent systems (Actor, Status, Items, UI)
+- Call out impacted dependent systems (Actor, Targeting, Status, Items, UI)
+
