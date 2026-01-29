@@ -1,218 +1,161 @@
 # ROADMAP.md — Ultimate Dungeon
 
-Version: 1.4  
+Version: 1.2  
 Last Updated: 2026-01-29  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
-Data: ScriptableObjects-first
+Data Model: ScriptableObjects-first  
 
 ---
 
 ## PURPOSE
 
-Defines the **authoritative build roadmap** for *Ultimate Dungeon*, including near-term implementation steps **and long-term vision features**.
+Defines the **authoritative build order** for *Ultimate Dungeon*, aligned to locked systems and scene separation.
 
-This roadmap is intentionally staged so that:
-- Core combat and survival systems are locked first
-- World-building, housing, and player expression systems are layered **after** stability
-- No future feature undermines server authority, risk, or persistence
+This roadmap prioritizes:
+- A clean **first playable combat slice**
+- Zero rewrites later due to camera, housing, or scene-rule mistakes
+- Explicit separation between **danger scenes** and **safe scenes**
 
 ---
 
 ## DESIGN LOCKS (DO NOT BREAK)
 
 1. Persistent multiplayer world
-2. Server-authoritative gameplay
+2. Server-authoritative rules
 3. Classless, skill-based progression
 4. Items + statuses drive power
-5. Risk, loss, and permanence matter
-6. No late-stage features may bypass combat or progression laws
+5. Deterministic combat resolution
+6. **SceneRuleContext gates all combat, damage, and progression**
+
+---
+
+## SCENE MODEL (LOCKED)
+
+| Scene | Purpose | Combat | Camera |
+|---|---|---:|---|
+| Hotnow Village | Spawn / hub / services | ❌ | Top-down |
+| Dungeon Scenes | Core gameplay | ✅ | Top-down (UO-style) |
+| Mainland Housing | Housing / vendors / immersion | ❌ | 1st / 3rd person |
 
 ---
 
 ## PHASE 1 — MULTIPLAYER FOUNDATION (COMPLETE)
 
-Status: ✅ COMPLETE
-
-- Networking bootstrap (Host / Client)
-- Player spawning and ownership
-- Server-authoritative movement (UO click-to-move)
-- Targeting and interaction
-- Player stats, vitals, skills
-- Progression laws locked
+✅ NGO setup (Host / Client)
+✅ Player spawning
+✅ Server-authoritative movement (click-to-move)
+✅ Status system bootstrap
+✅ Actor model established
 
 ---
 
-## PHASE 2 — CORE GAMEPLAY LAWS (COMPLETE)
+## PHASE 2 — CORE RULE SYSTEMS (COMPLETE)
 
-Status: ✅ COMPLETE
+✅ Actor Model (`ACTOR_MODEL.md`)
+✅ SceneRuleContext + SceneRuleFlags
+✅ Targeting Model (`TARGETING_MODEL.md`)
+✅ Combat Core (`COMBAT_CORE.md`)
 
-- Actor Model (PvE / PvP / factions / combat state)
-- Skill system and caps
-- Currency rules (Held vs Banked Coins)
-- Item system laws (ItemDef / ItemInstance)
-- Status Effect catalog
-- Spell schema
-
-> With Phase 2 complete, systems can be built without refactors.
+> With Phase 2 complete, **illegal combat is structurally impossible** in safe scenes.
 
 ---
 
-## PHASE 3 — COMBAT & SURVIVAL (CURRENT FOCUS)
+## PHASE 3 — FIRST PLAYABLE COMBAT SLICE (CURRENT)
 
-Status: 🚧 IN PROGRESS
+**Goal:** A small dungeon where players can fight, die, loot, and extract.
 
-### Step 11 — Combat Core (Immediate)
+### Required Systems
 
-- Server-side swing timer
-- Hit / miss resolution
-- DamagePacket pipeline
-- Death trigger
-- CombatStateTracker integration
+- ⬜ AttackLoop / SwingTimer (server)
+- ⬜ DamagePacket / HealPacket resolution
+- ⬜ CombatStateTracker
+- ⬜ Basic melee weapons
+- ⬜ Monster Actor definitions
+- ⬜ Death → corpse → loot flow
+- ⬜ Respawn / extraction back to Hotnow Village
 
-Acceptance:
-- Players can fight monsters
-- PvE loop feels correct
-- Combat state transitions replicate
+### Explicitly Out of Scope
 
----
-
-### Step 12 — Status Effects Runtime
-
-- StatusEffectSystem implementation
-- DoT ticking
-- Action gating (stun, paralyze, silence, root)
-- Invisibility / reveal integration
-
-Acceptance:
-- Status effects meaningfully alter combat
-- No combat action bypasses status gates
+- Housing
+- Vendors
+- Crafting
+- Resource gathering
+- First/third person camera
 
 ---
 
-### Step 13 — Items, Equipment & Loot
+## PHASE 4 — DUNGEON EXPANSION & POLISH
 
-- Equipment slots and handedness
-- Combat stat aggregation
-- Durability loss
-- Corpse + loot containers
-- Insurance rules
-
-Acceptance:
-- Death has meaningful item loss
-- Gear matters more than base stats
+- ⬜ Spellcasting pipeline
+- ⬜ Status-driven spell effects
+- ⬜ Ranged combat + ammo
+- ⬜ PvP enablement (Actor legality)
+- ⬜ Durability loss + repairs
+- ⬜ Bandaging / healing
 
 ---
 
-## PHASE 4 — WORLD DEPTH & PLAYER AGENCY (VISION STAGE)
+## PHASE 5 — MAINLAND HOUSING & ECONOMY (POST-COMBAT)
 
-> **This phase represents your longer-term Ultima Online–style vision.**
-> These systems are intentionally delayed until combat is proven stable.
+**This phase is intentionally deferred until combat is proven.**
 
----
+### Mainland Scene Systems
 
-### Step 14 — Camera Expansion (Top-Down → Third-Person Hybrid)
+- ⬜ Mainland world scene (large map, roads, plots)
+- ⬜ SceneRuleContext = `MainlandHousing`
+- ⬜ 1st / 3rd person camera controller
+- ⬜ Housing deeds
+- ⬜ Build envelope / placement rules
+- ⬜ Decoration & construction system
+- ⬜ Player vendors
+- ⬜ Vendor UI + pricing
 
-**Vision:**
-- Default view: top-down / isometric (combat readability)
-- Mouse wheel zooms smoothly down into a **third-person orbit camera**
-- Player can rotate camera freely at close zoom
-- Camera transitions are cosmetic only (no gameplay authority)
+### Explicit Locks
 
-**Design Constraints (LOCKED):**
-- Server never depends on camera state
-- Targeting remains raycast + Actor-based
-- Combat readability must remain valid at all zoom levels
-
-Acceptance:
-- Zoom feels smooth and intentional
-- No gameplay advantage from camera angle
-
----
-
-### Step 15 — Land Claim & Housing System (Major Feature)
-
-**Core Concept (LOCKED VISION):**
-- Players purchase a **Land Deed** from an NPC vendor
-- Deed placement claims a parcel of land
-- Each deed defines a **build radius / envelope**
-- Only the owning player (or permitted players) may build within the radius
-
-#### Land Claim Rules
-- Claims exist in the persistent world
-- Claims cannot overlap
-- Claims may be restricted by region (no-build zones)
-- Claims are server-authoritative and validated
-
-#### Ownership Model
-- ClaimOwner = Player ActorId
-- Optional: Co-owners / permissions
-- Claims persist across sessions
+- No combat
+- No damage
+- No skill gain
+- No durability loss
+- No resource gathering
 
 ---
 
-### Step 16 — Construction & Building (Valheim-Inspired)
+## PHASE 6 — SOCIAL & LONG-TAIL SYSTEMS
 
-**Building Model:**
-- Construction is **resource-driven**, not instant
-- Players must gather resources (wood, stone, metal, etc.)
-- Structures are assembled from placeable components
-
-Examples:
-- Foundations
-- Walls
-- Roofs
-- Doors
-- Furniture
-- Crafting stations
-
-**Design Constraints:**
-- Building actions are server-validated
-- Structures are world Actors or world-owned objects
-- No free placement without resources
-
-Acceptance:
-- Building feels earned
-- Houses are meaningful player achievements
+- ⬜ Guilds
+- ⬜ Party finder
+- ⬜ Friends / ignore lists
+- ⬜ Player housing permissions
+- ⬜ Mail system
 
 ---
 
-### Step 17 — Housing Integration
+## PHASE 7 — LIVE WORLD EVOLUTION
 
-- Player housing provides:
-  - Storage
-  - Decoration
-  - Crafting bonuses
-  - Social identity
-
-- Housing does NOT provide:
-  - Combat immunity
-  - Free fast travel
-  - Risk-free progression
-
-> Housing is expression and logistics, not power creep.
+- ⬜ Additional dungeons
+- ⬜ Dungeon modifiers / themes
+- ⬜ Seasonal content
+- ⬜ World events (dungeon-only)
 
 ---
 
-## PHASE 5 — SOCIAL & LONG-TERM SYSTEMS (FUTURE)
+## GUIDING PRINCIPLE (LOCKED)
 
-- Guilds
-- Permissions and shared housing
-- Regional factions
-- Guard / law systems
-- World events
-- Deeper dungeon layers
+> **Danger lives only where clarity exists.**  
+> **Comfort lives only where exploits cannot.**
+
+Housing, immersion, and social systems must never weaken combat integrity.
 
 ---
 
-## SUMMARY
+## DESIGN LOCK CONFIRMATION
 
-- Phases 1–2 are **done**
-- Phase 3 makes the game playable
-- Phase 4 fulfills the **Ultima Online fantasy**
-- Housing is treated as a **world system**, not a side feature
-- Camera expansion is cosmetic, not authoritative
+This roadmap is **authoritative**.
 
-This roadmap intentionally protects the core while allowing your long-term vision to grow naturally.
+Any change must:
+- Increment Version
+- Update Last Updated
+- Call out impacted phases or systems
 
