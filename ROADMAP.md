@@ -1,7 +1,7 @@
 # ROADMAP.md — Ultimate Dungeon
 
-Version: 1.3  
-Last Updated: 2026-01-28  
+Version: 1.4  
+Last Updated: 2026-01-29  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
 Authority: Server-authoritative  
@@ -9,287 +9,210 @@ Data: ScriptableObjects-first
 
 ---
 
-## Purpose
+## PURPOSE
 
-A **step-by-step, logical build order** for the first playable vertical slice of *Ultimate Dungeon*.
+Defines the **authoritative build roadmap** for *Ultimate Dungeon*, including near-term implementation steps **and long-term vision features**.
 
-**Goal of the first slice:**
-- Host can start the game
-- Clients can join
-- Players spawn in a small “Crater Village” test area
-- Ultima Online–style click-to-move works
-- Targeting + interaction + visual feedback exists
-- Player stats / vitals / skills are visible and authoritative
-- Progression laws are locked **before combat math**
+This roadmap is intentionally staged so that:
+- Core combat and survival systems are locked first
+- World-building, housing, and player expression systems are layered **after** stability
+- No future feature undermines server authority, risk, or persistence
 
 ---
 
-## Design Locks (Do Not Break)
+## DESIGN LOCKS (DO NOT BREAK)
 
-1. **Persistent multiplayer world**
-2. **Server-authoritative rules**
-3. **Classless / skill-based progression**
-4. **Items + statuses drive power**
-5. **Data externalized (ScriptableObjects + registries)**
-
----
-
-## Phase 1 — Multiplayer Foundation (COMPLETE)
-
-### Step 0 — Repo + Project Hygiene  
-**Status:** ✅ COMPLETED
-
-- Git repo created
-- Unity-safe folder structure established
-- Naming conventions locked
+1. Persistent multiplayer world
+2. Server-authoritative gameplay
+3. Classless, skill-based progression
+4. Items + statuses drive power
+5. Risk, loss, and permanence matter
+6. No late-stage features may bypass combat or progression laws
 
 ---
 
-### Step 1 — Core Packages  
-**Status:** ✅ COMPLETED
+## PHASE 1 — MULTIPLAYER FOUNDATION (COMPLETE)
 
-- URP
-- Netcode for GameObjects
-- Unity Transport
-- Input System
+Status: ✅ COMPLETE
 
----
-
-### Step 2 — Test World Scene  
-**Status:** ⚠️ PARTIAL
-
-- Simple test scene in use
-- Flat ground + test objects
-- Temporary lighting
-
-**Planned:**
-- Replace with Crater Village prototype scene
+- Networking bootstrap (Host / Client)
+- Player spawning and ownership
+- Server-authoritative movement (UO click-to-move)
+- Targeting and interaction
+- Player stats, vitals, skills
+- Progression laws locked
 
 ---
 
-### Step 3 — Networking Bootstrap (Host / Client / Spawn)  
-**Status:** ✅ COMPLETED
+## PHASE 2 — CORE GAMEPLAY LAWS (COMPLETE)
 
-Implemented:
-- `NetworkHudController`
-- NGO + Transport configured
-- Player prefab registered
-- Ownership validated
+Status: ✅ COMPLETE
 
-Acceptance met:
-- Host + client connect
-- Players spawn correctly
-- Only local player accepts input
+- Actor Model (PvE / PvP / factions / combat state)
+- Skill system and caps
+- Currency rules (Held vs Banked Coins)
+- Item system laws (ItemDef / ItemInstance)
+- Status Effect catalog
+- Spell schema
 
----
-
-### Step 4 — Player Core Data Model (SO-first)  
-**Status:** ✅ COMPLETED
-
-Implemented:
-- `PlayerDefinition` (ScriptableObject)
-- `PlayerCore` (server initializer)
-- `PlayerStats` (STR / DEX / INT)
-- `PlayerVitals` (HP / Stam / Mana, 150 cap)
-- `PlayerSkillBook` (all skills present at start)
-
-Locked:
-- Stat → Vital derivation
-- Hard vital caps
-- Skill cap (700) + manual redistribution
+> With Phase 2 complete, systems can be built without refactors.
 
 ---
 
-### Step 5 — Server-Authoritative Movement (UO Style)  
-**Status:** ✅ COMPLETED
+## PHASE 3 — COMBAT & SURVIVAL (CURRENT FOCUS)
 
-Implemented:
-- `ServerClickMoveMotor` (CharacterController)
-- `ClickToMoveInput_UO`
-  - Right click = move
-  - Hold right click = steer
-- Server ownership validation
+Status: 🚧 IN PROGRESS
 
-Acceptance met:
-- Smooth multiplayer movement
-- No client-side authority
+### Step 11 — Combat Core (Immediate)
 
----
-
-### Step 6 — Camera + Input Binding  
-**Status:** ⚠️ PARTIAL
-
-Completed:
-- `LocalCameraBinder`
-
-Remaining:
-- CursorStack
-- UIInputGate
-- Camera polish (zoom, clamp)
-
----
-
-### Step 7 — Targeting & Interaction Skeleton  
-**Status:** ✅ COMPLETED
-
-Implemented:
-- `PlayerTargeting`
-- `LeftClickTargetPicker_v3`
-- `IInteractable`
-- `PlayerInteractor` (double left click)
-- `InteractableDummy`
-
-Acceptance met:
-- Left click selects / clears target
-- Double left click interacts
-- Server validates ownership + range
-
----
-
-### Step 8 — Visual Feedback (Targeting UI)  
-**Status:** ✅ COMPLETED
-
-Implemented:
-- `TargetFrameUI`
-- `TargetIndicatorFollower`
-- Bounds-correct target ring placement
-- `TargetRingPulse`
-- `TargetRingFactionTint`
-
-Acceptance met:
-- Target ring appears only for local player
-- Ring tracks target bounds correctly
-- Faction-based tinting works
-
----
-
-### Step 9 — Player UI (Stats / Vitals / Skills)  
-**Status:** ✅ COMPLETED
-
-Implemented:
-- `PlayerStatsNet`
-- `PlayerVitalsNet`
-- `PlayerSkillBookNet`
-- `HudVitalsUI`
-- `CharacterStatsPanelUI`
-- `LocalPlayerUIBinder`
-
-Acceptance met:
-- Server-authoritative values displayed
-- UI auto-binds on local player spawn
-- No gameplay logic in UI
-
----
-
-## Phase 2 — Progression & Gameplay Laws
-
-### Step 10 — Skill & Stat Gain System (LOCKED)
-**Status:** ✅ COMPLETED
-
-Implemented:
-- `SkillGainSystem`
-  - Use-based gains
-  - Skill lock enforcement (+ / − / locked)
-  - Total skill cap handling (700)
-- `StatGainSystem`
-  - UO-style +1 base stat gains
-  - Deterministic RNG (caller-provided)
-  - Explicit hooks for future stat caps
-- `DeterministicRng`
-- `StatId`
-
-Validation:
-- `InteractableSkillUseTester` confirms:
-  - Skill gain works end-to-end
-  - Stat gain works end-to-end
-  - Vitals recompute once per stat change
-
-**Design Outcome:**
-- Progression laws are now locked
-- Combat math can be built safely on top
-
----
-
-## CURRENT PROJECT STATE (SUMMARY)
-
-✅ Networking & spawning complete  
-✅ Server-authoritative movement complete  
-✅ UO-style targeting complete  
-✅ Double-click interaction complete  
-✅ Player stats / vitals / skills authoritative  
-✅ Progression laws locked (skills + stats)
-
-🚧 Combat not started  
-🚧 Status effects not started  
-🚧 Items / equipment not started
-
----
-
-## Phase 3 — Combat & Survival Systems (NEXT)
-
-### Step 11 — Combat Core (NEXT LOCK)
-
-Planned:
-- Auto-attack loop (swing timer)
+- Server-side swing timer
 - Hit / miss resolution
-- Damage packets
+- DamagePacket pipeline
 - Death trigger
+- CombatStateTracker integration
 
-Design constraints:
-- Must consume stamina
-- Must integrate with skill + stat values
-- Must NOT modify progression rules
-
----
-
-### Step 12 — Status Effect System
-
-Planned:
-- Central status registry
-- Timed + conditional effects
-- Damage-over-time
-- Buffs / debuffs
-
-Design rule:
-- Status effects modify combat and survival
-- Status effects do NOT grant raw power alone
+Acceptance:
+- Players can fight monsters
+- PvE loop feels correct
+- Combat state transitions replicate
 
 ---
 
-### Step 13 — Item Model + Equipment
+### Step 12 — Status Effects Runtime
 
-Planned:
-- Equipment slots
-- Stat modifiers
-- Durability
-- Random properties
+- StatusEffectSystem implementation
+- DoT ticking
+- Action gating (stun, paralyze, silence, root)
+- Invisibility / reveal integration
 
----
-
-### Step 14 — Inventory, Loot, Death
-
-Planned:
-- Corpse on death
-- Full loot
-- Insurance system
+Acceptance:
+- Status effects meaningfully alter combat
+- No combat action bypasses status gates
 
 ---
 
-## Immediate Next Task (Recommended)
+### Step 13 — Items, Equipment & Loot
 
-👉 **Step 11 — Combat Core (Hit / Miss + Swing Timer)**
+- Equipment slots and handedness
+- Combat stat aggregation
+- Durability loss
+- Corpse + loot containers
+- Insurance rules
 
-Reason:
-- Progression laws are locked
-- UI and replication already exist
-- Combat can now be implemented without refactors
+Acceptance:
+- Death has meaningful item loss
+- Gear matters more than base stats
 
 ---
 
-If you want next:
-- A **Combat Core design doc**
-- A **server-only combat prototype**
-- Or a **Status Effect architecture draft**
+## PHASE 4 — WORLD DEPTH & PLAYER AGENCY (VISION STAGE)
 
-Just say the word.
+> **This phase represents your longer-term Ultima Online–style vision.**
+> These systems are intentionally delayed until combat is proven stable.
+
+---
+
+### Step 14 — Camera Expansion (Top-Down → Third-Person Hybrid)
+
+**Vision:**
+- Default view: top-down / isometric (combat readability)
+- Mouse wheel zooms smoothly down into a **third-person orbit camera**
+- Player can rotate camera freely at close zoom
+- Camera transitions are cosmetic only (no gameplay authority)
+
+**Design Constraints (LOCKED):**
+- Server never depends on camera state
+- Targeting remains raycast + Actor-based
+- Combat readability must remain valid at all zoom levels
+
+Acceptance:
+- Zoom feels smooth and intentional
+- No gameplay advantage from camera angle
+
+---
+
+### Step 15 — Land Claim & Housing System (Major Feature)
+
+**Core Concept (LOCKED VISION):**
+- Players purchase a **Land Deed** from an NPC vendor
+- Deed placement claims a parcel of land
+- Each deed defines a **build radius / envelope**
+- Only the owning player (or permitted players) may build within the radius
+
+#### Land Claim Rules
+- Claims exist in the persistent world
+- Claims cannot overlap
+- Claims may be restricted by region (no-build zones)
+- Claims are server-authoritative and validated
+
+#### Ownership Model
+- ClaimOwner = Player ActorId
+- Optional: Co-owners / permissions
+- Claims persist across sessions
+
+---
+
+### Step 16 — Construction & Building (Valheim-Inspired)
+
+**Building Model:**
+- Construction is **resource-driven**, not instant
+- Players must gather resources (wood, stone, metal, etc.)
+- Structures are assembled from placeable components
+
+Examples:
+- Foundations
+- Walls
+- Roofs
+- Doors
+- Furniture
+- Crafting stations
+
+**Design Constraints:**
+- Building actions are server-validated
+- Structures are world Actors or world-owned objects
+- No free placement without resources
+
+Acceptance:
+- Building feels earned
+- Houses are meaningful player achievements
+
+---
+
+### Step 17 — Housing Integration
+
+- Player housing provides:
+  - Storage
+  - Decoration
+  - Crafting bonuses
+  - Social identity
+
+- Housing does NOT provide:
+  - Combat immunity
+  - Free fast travel
+  - Risk-free progression
+
+> Housing is expression and logistics, not power creep.
+
+---
+
+## PHASE 5 — SOCIAL & LONG-TERM SYSTEMS (FUTURE)
+
+- Guilds
+- Permissions and shared housing
+- Regional factions
+- Guard / law systems
+- World events
+- Deeper dungeon layers
+
+---
+
+## SUMMARY
+
+- Phases 1–2 are **done**
+- Phase 3 makes the game playable
+- Phase 4 fulfills the **Ultima Online fantasy**
+- Housing is treated as a **world system**, not a side feature
+- Camera expansion is cosmetic, not authoritative
+
+This roadmap intentionally protects the core while allowing your long-term vision to grow naturally.
 
