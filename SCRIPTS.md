@@ -1,6 +1,6 @@
 # SCRIPTS.md — Ultimate Dungeon (Current Script Inventory)
 
-Version: 1.5  
+Version: 1.6  
 Last Updated: 2026-01-31
 
 ---
@@ -216,19 +216,105 @@ Authoritative behavior and rules live in the design documents:
 
 ### `ActorVitals`
 **Purpose:**
-- Holds current/max HP
-- Applies damage and death
+- **Single source of truth** for Actor vitals (Players + Monsters + NPCs)
+- Holds replicated current/max values for:
+  - HP
+  - Stamina
+  - Mana
+- Server-authoritative mutation helpers (damage/heal/spend/restore)
 
 **Notes:**
-- Server-authoritative
+- Server writes NetworkVariables; clients read
+- Combat systems should only mutate via ActorVitals server methods
+
+---
+
+### `PlayerVitalsRegenServer`
+**Purpose:**
+- Server-only regeneration ticking for Players
+- Reads regen rates from `PlayerDefinition` and restores vitals on `ActorVitals`
+
+**Notes:**
+- Exists to keep `ActorVitals` generic (so monsters can have different regen rules)
+
+---
+
+## PLAYER RUNTIME HUB
+
+### `PlayerCore`
+**Purpose:**
+- Central runtime hub for player-only systems
+- Holds key references (Stats, SkillBook, Vitals)
+- Runs server-authoritative initialization using `PlayerDefinition`
+
+**Notes:**
+- Vitals are now `ActorVitals` (not PlayerVitals)
+- Initializes max vitals from attributes (HP=STR, Stamina=DEX, Mana=INT) clamped to `vitalCap`
+- Binds/enables `PlayerVitalsRegenServer` (server only)
+
+---
+
+## UI BINDING
+
+### `LocalPlayerUIBinder`
+**Purpose:**
+- Listens for local player spawn
+- Binds UI panels to the local player’s replicated components
+
+**Current Bindings:**
+- HUD vitals bind to `ActorVitals`
+- Character stats panel binds to `PlayerStatsNet` (if present)
+
+---
+
+## HUD
+
+### `HudVitalsUI`
+**Purpose:**
+- Displays HP/Stamina/Mana bars and values for the local player
+
+**Notes:**
+- Binds to `ActorVitals` only
+- Subscribes to vitals NetworkVariable changes for immediate UI updates
+
+---
+
+## HOTBAR (UI) — NEW
+
+### `HotbarUI`
+**Purpose:**
+- 10-slot hotbar UI presentation
+- Raises `SlotActivated(slotIndex)` events for systems to hook into
+
+**Notes:**
+- UI-only (does not perform server actions)
+- Intended to be the activation surface for boot sprint, potions, spells, etc.
+
+---
+
+### `HotbarSlotUI`
+**Purpose:**
+- Visual representation of a hotbar slot
+- Shows icon + key label
+- Clickable and provides simple pulse feedback
+
+---
+
+### `HotbarInputRouter`
+**Purpose:**
+- Routes keyboard input **1–0** to hotbar slot activations
+- Supports both Input backends:
+  - New Input System (`ENABLE_INPUT_SYSTEM`)
+  - Legacy Input (`Input.GetKeyDown`)
 
 ---
 
 ## NOTES / CLEANUP
 
-- This document intentionally includes spike and early-pass systems
-- Legacy or test scripts should be marked clearly or removed
-- If a rule is not defined in the authoritative docs, it does not exist
+- **Vitals consolidation:** `PlayerVitals` and `PlayerVitalsNet` were removed in favor of `ActorVitals`.
+- This document intentionally includes spike and early-pass systems.
+- Legacy or test scripts should be marked clearly or removed.
+- If a rule is not defined in the authoritative docs, it does not exist.
 
 ---
 
