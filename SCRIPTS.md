@@ -1,27 +1,28 @@
 # SCRIPTS.md — Ultimate Dungeon (Current Script Inventory)
 
 Version: 1.5  
-Last Updated: 2026-01-30
+Last Updated: 2026-01-31
 
 ---
 
 ## PURPOSE
 
-This document lists the **scripts currently present and in use** in *Ultimate Dungeon*.
+This document lists the **scripts currently present and in active use** in *Ultimate Dungeon*.
 
 This document is **NOT authoritative**.
+
 It exists to:
 - Track what scripts currently exist
-- Describe their *current* responsibilities
+- Describe their *current responsibilities*
 - Help with prefab/scene wiring and cleanup
-- Identify legacy or transitional systems
+- Identify legacy, spike, or transitional systems
 
-Authoritative behavior and rules live in the design docs:
+Authoritative behavior and rules live in the design documents:
 - `ACTOR_MODEL.md`
 - `TARGETING_MODEL.md`
 - `COMBAT_CORE.md`
+- `SCENE_RULE_PROVIDER.md`
 - `PLAYER_DEFINITION.md`
-- `STATUS_EFFECT_CATALOG.md`
 
 ---
 
@@ -31,286 +32,214 @@ Authoritative behavior and rules live in the design docs:
 - Netcode for GameObjects (NGO)
 - Server-authoritative gameplay
 - Ultima Online–style controls
-  - Right click: move
-  - Right click hold: continuous steering
-  - Left click: target/select
-  - Double left click: attack or interact
+  - Right click: move / chase
+  - Left click: select target
+  - Double left click: attack / interact
 
 ---
 
-## ACTOR / TARGETING LAYER (CURRENT)
+## BOOTSTRAP & NETWORKING
 
-These scripts now exist and form the **mandatory foundation** for combat and interaction.
+### `NetworkHudController`
+**Purpose:** Temporary Host/Client UI for starting and stopping NGO sessions.
+
+**Notes:**
+- Debug-only
+- Will be removed once proper frontend exists
+
+---
+
+## ACTOR CORE
 
 ### `ActorComponent`
-**Purpose:** Canonical runtime identity for all actors.
-
-**Responsibilities:**
-- ActorType (Player, Monster, NPC, Vendor, Pet, Summon, Object)
-- FactionId
-- Alive / Dead state
-- Scene-aware behavior hooks
+**Purpose:**
+- Server-authoritative Actor identity surface
+- Holds ActorType, FactionId, Alive/Dead state, CombatState
 
 **Notes:**
-- Present on **all** actors
-- Referenced by targeting, faction, combat, interaction systems
+- Required on ALL actors (Players, Monsters, NPCs, Objects)
+- CombatState is written ONLY by `CombatStateTracker`
 
 ---
 
-### `FactionService`
-**Purpose:** Pure rules lookup for actor relationships.
-
-**Responsibilities:**
-- Evaluates Friendly / Neutral / Hostile relationships
-- Uses data defined in `ACTOR_MODEL.md`
+### `CombatActorFacade`
+**Purpose:**
+- Unified interface adapter (`ICombatActor`) for Combat Core
+- Exposes vitals, stats, transform, and legality gates
 
 **Notes:**
-- No Unity, no networking, no scene access
+- Consumed by CombatResolver and AttackLoop
+- Does not own combat rules
 
 ---
 
-### `TargetingResolver`
-**Purpose:** Pure rules engine for targeting and attack legality.
+## TARGETING & INTENT
 
-**Responsibilities:**
-- Eligibility checks (alive, visibility, range)
-- Disposition resolution (Self / Friendly / Neutral / Hostile / Invalid)
-- Attack legality resolution
+### `PlayerTargeting`
+**Purpose:**
+- Holds the local player’s currently selected target
+- Emits events for UI (target rings, frames, etc.)
 
 **Notes:**
-- Deterministic and unit-testable
-- Does not access Unity objects directly
+- Local-only
+- Clearing target triggers RequestStopAttack
 
 ---
 
-### `ServerTargetValidator`
-**Purpose:** Server-only validation bridge.
+### `CombatEngageIntent`
+**Purpose:**
+- Local-only intent model for Ultima Online–style combat
+- Tracks whether the player has explicitly armed an attack
 
-**Responsibilities:**
-- Resolves NetworkObjectId → ActorComponent
-- Gathers SceneRuleFlags
-- Computes range / LoS (v1: range only)
-- Delegates legality to `TargetingResolver`
+**Notes:**
+- Being out of range does NOT clear intent
+- Intent clears only on explicit cancel or target invalidation
+
+---
+
+## PLAYER COMBAT CONTROL
+
+### `PlayerCombatController`
+**Purpose:**
+- Server-authoritative attack request handler
+- Validates attack intent using Targeting + Scene rules
+- Starts and stops AttackLoop
+
+**Notes:**
+- Clients submit intent only
+- Server commits exactly once
+
+---
+
+## COMBAT EXECUTION (SERVER)
+
+### `AttackLoop`
+**Purpose:**
+- Server-owned auto-attack loop (swing scheduling)
+- Repeats swings while attacker/target remain valid and in range
+
+**Notes:**
+- Range gates swings, NOT combat state
+- Loop stopping does not end combat by itself
+
+---
+
+### `CombatResolver`
+**Purpose:**
+- Sole authority that resolves completed combat actions
+- Applies DamagePackets and triggers death exactly once
+
+**Notes:**
+- Always server-only
+- v0.1: always-hit, fixed damage
 
 ---
 
 ### `CombatStateTracker`
-**Purpose:** Tracks hostile engagement state.
+**Purpose:**
+- Server-authoritative combat state surface
+- Transitions Actor between Peaceful / InCombat / Dead
 
-**Responsibilities:**
-- Records hostile actions started / received
-- Drives CombatState transitions:
-  - Idle
-  - Engaged
-  - InCombat
-  - Dead
-
-**Notes:**
-- Server authoritative
-- Not a damage system
-
----
-
-## SCENE RULES
-
-### `SceneRuleProvider`
-**Purpose:** Declares authoritative scene behavior.
-
-**Responsibilities:**
-- Declares SceneRuleContext (Dungeon / Village / Mainland)
-- Resolves SceneRuleFlags
-- Registers flags into SceneRuleRegistry
-
----
-
-### `SceneRuleRegistry`
-**Purpose:** Global access point for active scene rules.
+**Current Rules:**
+- Any hostile action refreshes combat window
+- Combat persists while AttackLoop is running OR window active
+- Combat ends only after disengage timeout
 
 **Notes:**
-- Server authoritative
-- Readable by clients for UI hints
-
----
-
-## NETWORKING / BOOTSTRAP
-
-### `NetworkHudController`
-**Purpose:** Temporary Host / Client UI.
-
----
-
-### `PlayerNetIdentity`
-**Purpose:** Player NGO identity and discovery.
-
-**Responsibilities:**
-- Detects player spawn
-- Determines local ownership
-- Emits LocalPlayerSpawned event
-
----
-
-## PLAYER CORE / STATS / VITALS
-
-### `PlayerCore`
-**Purpose:** Server-side initialization root.
-
-Initializes:
-- PlayerStats
-- PlayerVitals
-- PlayerSkillBook
-
----
-
-### `PlayerStats`
-**Purpose:** STR / DEX / INT container.
-
----
-
-### `PlayerVitals`
-**Purpose:** Authoritative HP / Stamina / Mana.
-
----
-
-### `PlayerSkillBook`
-**Purpose:** Skill container + caps.
+- Loop stopping is NOT a combat-extending event
+- Scene rules may forbid entering combat
 
 ---
 
 ## MOVEMENT
 
+### `ClickToMoveInput`
+**Purpose:**
+- Owner-only input collector for Ultima Online–style movement
+- Sends destination intent to server motor
+
+**Notes:**
+- Right-click move does NOT cancel combat intent
+- Chasing while InCombat is supported
+
+---
+
 ### `ServerClickMoveMotor`
-**Purpose:** Server-authoritative movement motor.
-
----
-
-### `ClickToMoveInput_UO`
-**Purpose:** Client-side UO-style movement input.
-
----
-
-## TARGETING (LOCAL UX ONLY)
-
-### `PlayerTargeting`
-**Purpose:** Local target selection state.
+**Purpose:**
+- Server-authoritative movement execution
+- Receives destination requests from clients
 
 **Notes:**
-- UX only
-- Does not imply legality
+- Combat does not own movement
 
 ---
 
-### `LeftClickTargetPicker_v3`
-**Purpose:** Raycast-based target picker.
+## CAMERA
 
----
-
-## COMBAT CORE
-
-### `ICombatActor`
-**Purpose:** Minimal combat-facing actor interface.
-
----
-
-### `CombatActorFacade`
-**Purpose:** Adapter between ActorComponent/Vitals and combat core.
-
----
-
-### `ActorVitals`
-**Purpose:** Combat-only HP container.
+### `IsometricCameraFollow` / `TopDownCameraFollow`
+**Purpose:**
+- Simple isometric / semi-top-down camera follow
+- Uses fixed rotation (no swivel)
 
 **Notes:**
-- Currently separate from PlayerVitals
+- Runs on CameraRig, not MainCamera
+- Implements `ICameraFollowTarget`
 
 ---
 
-### `PlayerCombatController`
-**Purpose:** Client → server attack intent bridge.
+### `LocalCameraBinder`
+**Purpose:**
+- Binds the local player transform to the camera follow script
+- Retries until local player exists (NGO-safe)
+
+**Notes:**
+- Owner-only
+- Avoids hard references between camera and player prefabs
 
 ---
 
-### `AttackLoop`
-**Purpose:** Server-side swing timer and auto-attack loop.
-
----
-
-### `CombatResolver`
-**Purpose:** Server-only resolution of hits, damage, and death.
-
-**Responsibilities:**
-- Applies DamagePackets
-- Triggers death once
-- Despawns actors on death (v1 quick fix)
-
----
-
-### `DoubleClickAttackInput`
-**Purpose:** UX detection of attack intent.
-
----
-
-## VISUAL FEEDBACK (LOCAL ONLY)
+## VISUAL FEEDBACK
 
 ### `HitFlash`
-**Purpose:** Simple material flash on hit.
+**Purpose:**
+- Simple hit flash feedback on damaged actors
 
 ---
 
 ### `DamageFeedbackReceiver`
-**Purpose:** Floating damage numbers (e.g. “-1”).
+**Purpose:**
+- Displays floating damage numbers
 
 ---
 
-### `MinimalDebugHud`
-**Purpose:** Lightweight on-screen debug readout.
+## STATUS & VITALS
 
-Displays:
-- SceneRuleContext / Flags
-- Targeting disposition
-- CombatState
+### `ActorVitals`
+**Purpose:**
+- Holds current/max HP
+- Applies damage and death
 
----
-
-## PREFABS — EXPECTED STATE
-
-### Player (`PF_Player`)
-Required components:
-- NetworkObject
-- NetworkTransform
-- CharacterController
-- PlayerNetIdentity
-- PlayerCore
-- PlayerStats
-- PlayerVitals
-- ActorVitals
-- PlayerSkillBook
-- ServerClickMoveMotor
-- ClickToMoveInput_UO
-- PlayerTargeting
-- LeftClickTargetPicker_v3
-- PlayerCombatController
-- CombatActorFacade
-- AttackLoop
-- ActorComponent
-- CombatStateTracker
+**Notes:**
+- Server-authoritative
 
 ---
 
-## KNOWN INTENTIONAL GAPS
+## NOTES / CLEANUP
 
-- No corpse persistence (despawn-on-death v1)
-- No AI retaliation
-- No ranged combat
-- No spellcasting
-- No inventory/equipment UI
+- This document intentionally includes spike and early-pass systems
+- Legacy or test scripts should be marked clearly or removed
+- If a rule is not defined in the authoritative docs, it does not exist
 
 ---
 
-## NEXT CLEANUP TARGETS
+## DESIGN CONFIRMATION
 
-1. Corpse vs Despawn policy
-2. Combat disengage rules
-3. AI aggression & retaliation
-4. Unify PlayerVitals ↔ ActorVitals
-5. Drive UI tinting from TargetingDisposition
+This document is **informational only**.
+
+Any conflict between this file and:
+- `ACTOR_MODEL.md`
+- `TARGETING_MODEL.md`
+- `COMBAT_CORE.md`
+
+The design docs win.
 
