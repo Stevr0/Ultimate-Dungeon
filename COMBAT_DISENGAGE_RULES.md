@@ -1,6 +1,6 @@
 # COMBAT_DISENGAGE_RULES.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.0  
+Version: 1.1  
 Last Updated: 2026-01-30  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
@@ -12,253 +12,122 @@ Authority: Server-authoritative
 
 Defines the authoritative rules for **ending combat** (disengage) in *Ultimate Dungeon*.
 
-This document answers:
-- When does an Actor leave `CombatState.InCombat`?
-- What events extend combat?
-- What must be cleared when combat ends?
-- How do **safe scenes** guarantee peace?
-
-If a disengage rule is not defined here, **it does not exist**.
-
 ---
 
 ## DEPENDENCIES (MUST ALIGN)
 
 - `ACTOR_MODEL.md`
-  - Defines `CombatState` values and the rule that safe scenes may never enter `InCombat`.
 - `TARGETING_MODEL.md`
-  - Defines legal hostile intents and deny reasons.
 - `COMBAT_CORE.md`
-  - Defines combat scheduling/resolution and the requirement to notify combat state tracking on hostile actions.
 - `SCENE_RULE_PROVIDER.md`
-  - Defines scene transitions that must clear illegal state (combat, selection, timers).
-
----
-
-## SCOPE BOUNDARIES (NO OVERLAP)
-
-### This document owns
-- The **disengage timer** model
-- The definition of **combat-extending events**
-- Combat exit side-effects (what must be cleared)
-- Scene-based overrides for safe scenes
-
-### This document does NOT own
-- Hostility/PvP legality (owned by `ACTOR_MODEL.md`)
-- Hit/miss/damage math or order-of-operations (owned by `COMBAT_CORE.md`)
-- Status definitions (owned by `STATUS_EFFECT_CATALOG.md`)
-- Death/respawn/corpse/insurance rules (owned by death + player rules docs)
 
 ---
 
 ## DESIGN LOCKS (MUST ENFORCE)
 
-1. **Server authoritative**
-   - Only the server may start, extend, or end combat state.
-
-2. **Scene rules are hard gates**
-   - If `CombatAllowed == false`, an Actor may never be `InCombat`.
-   - Entering a safe scene forces `Peaceful` immediately.
-
-3. **Single timer model per Actor**
-   - Each Actor has a single authoritative `combatUntilTime` (or equivalent).
-
-4. **No hidden exceptions**
-   - If an event should extend combat, it must be listed in this document.
-
----
-
-## TERMS
-
-### Combat Engagement Window
-A time window during which an Actor is considered **in combat**.
-
-- An Actor is `InCombat` if `now < combatUntilTime`.
-- When `now >= combatUntilTime`, the Actor returns to `Peaceful`.
-
-### Disengage Duration
-The time added to the engagement window when a combat-extending event occurs.
+1. **Server authoritative** (server decides start/extend/end)
+2. **Scene rules are hard gates** (safe scenes cannot be `InCombat`)
+3. **Single timer per Actor** (`combatUntilTime`)
+4. **No hidden exceptions** (only the events listed here extend combat)
 
 ---
 
 ## AUTHORITATIVE CONSTANTS
 
-> These constants are authoritative policy values.
-
-### Disengage Duration
 - `DISENGAGE_SECONDS = 10.0`
-
-Meaning:
-- After the last combat-extending event affecting an Actor, they remain `InCombat` for **10 seconds**.
-
-> If later tuning is needed, this value changes here and must be applied consistently everywhere.
 
 ---
 
-## COMBAT STATE MODEL (RECAP)
+## CORE MODEL
 
-This doc assumes the `CombatState` enum exists in `ACTOR_MODEL.md`:
-- `Peaceful`
-- `InCombat`
-- `Dead`
+Each Actor tracks:
+- `combatUntilTime` (server time)
+- `hasActiveHostileEngagement` (server truth; attacker-side only)
 
-Rules:
-- `Dead` overrides everything: dead actors are never set to `Peaceful` until the death/respawn pipeline transitions them.
-- Safe scenes (`CombatAllowed == false`) override everything: actors are forced to `Peaceful` and cannot re-enter combat.
+Meaning:
+- `InCombat` if **either**:
+  - `hasActiveHostileEngagement == true` *(attacker pursuing/auto-attacking a valid target)*
+  - `now < combatUntilTime` *(recently involved in hostile resolution)*
+
+- Combat ends when **both** are false:
+  - `hasActiveHostileEngagement == false`
+  - `now >= combatUntilTime`
 
 ---
 
 ## COMBAT-EXTENDING EVENTS (LOCKED)
 
-When any of the following events occurs, the server must **refresh** combat for the relevant Actor(s) by setting:
+When any listed event occurs, the server refreshes:
 
 `combatUntilTime = max(combatUntilTime, now + DISENGAGE_SECONDS)`
 
-### 1) Hostile intent validated (start of aggression)
+### 1) Validated hostile intent (attacker only)
 When the server validates a hostile intent as **Allowed**:
-- `TargetIntentType.Attack`
-- `TargetIntentType.CastHarmful` *(when Magic exists)*
+- `Attack`
+- `CastHarmful` *(when magic exists)*
 
-Refresh combat for:
-- Attempter (attacker/caster)
+Effects:
+- Refresh combat for the **attacker**
+- Set `hasActiveHostileEngagement = true` for the attacker
 
-Notes:
-- This event must not fire if legality fails.
-- This event must not fire in safe scenes.
+**Design lock:** Range does **not** block intent validation. Range only controls whether a swing/spell can **resolve**.
 
-### 2) Hostile resolution occurs (impact)
-When combat resolves a hostile outcome:
-- A swing timer completes and results in `Hit` or `Miss`
-- A `DamagePacket` is applied *(from any source: weapon, spell, DoT)*
+### 2) Hostile resolution (attacker + victim)
+When a hostile outcome resolves:
+- Swing timer completes and results in `Hit` or `Miss`
+- A `DamagePacket` is applied
 
-Refresh combat for:
-- Attacker (source)
-- Victim (receiver)
+Effects:
+- Refresh combat for **attacker** and **victim**
 
-Notes:
-- For DoT ticks, the **source** is the applier of the DoT status.
-- Scene must be re-gated (if combat/damage not allowed, do not refresh).
+### 3) Engagement ends (attacker only)
+When the attacker no longer has an active hostile engagement:
+- Player cancels attack
+- Target becomes invalid (dead/despawned)
+- Target becomes illegal (scene gate, hostility gate)
 
-### 3) Receiving hostile targeting while legal (optional, v1 OFF)
-This is explicitly **disabled in v1**.
+Effects:
+- Set `hasActiveHostileEngagement = false`
+- Do **not** refresh `combatUntilTime`
+- Disengage will occur naturally when `now >= combatUntilTime`
 
-Meaning:
-- Simply being selected/targeted does not extend combat.
-- Only validated hostile actions and resolved hostile outcomes extend combat.
-
-Rationale:
-- Prevents griefing by “perma-combat” targeting.
+### Selection rule
+Selection alone never refreshes combat.
 
 ---
 
 ## DISENGAGE TRANSITION (LOCKED)
 
-### When combat ends
-On the server tick/update (or as part of a periodic state evaluation), for each Actor:
-- If `CombatState == InCombat` and `now >= combatUntilTime`:
-  - transition to `Peaceful`
-
-### Side-effects on exit
-When transitioning `InCombat → Peaceful`, the server must:
-
-1. **Clear auto-attack scheduling**
-   - Cancel swing timers / `AttackLoop` for this Actor
-
-2. **Clear hostile “current target” if it was an attack target** *(recommended, v1 ON)*
-   - If the Actor’s current selection was set by an `Attack` intent, clear selection
-   - If selection was set by `Select` or `Interact`, keep it
-
-3. **Clear aggression bookkeeping**
-   - Any “last hostile actor” references used only for combat state display should be cleared
-
-4. **Do not modify movement**
-   - Combat ending does not force-stop movement
+When combat ends (see Core Model):
+- Transition `InCombat → Peaceful`
+- Cancel attack loops
+- Clear hostile selection (attack-driven only)
 
 ---
 
 ## SAFE SCENE OVERRIDES (LOCKED)
 
-In `MainlandHousing` and `HotnowVillage`:
-
-1. `CombatAllowed == false` means:
-   - Actors may never enter `InCombat`
-   - Any attempt to refresh combat is ignored
-
-2. On entering a safe scene (server transition hook):
-   - Force `CombatState = Peaceful`
-   - Set `combatUntilTime = 0`
-   - Cancel swing timers / attacks
-   - Clear hostile selection
-
-This must happen even if:
-- Timers are pending
-- CombatUntilTime is in the future
+If `CombatAllowed == false`:
+- Actor may never be `InCombat`
+- On entering the scene, force:
+  - `CombatState = Peaceful`
+  - `combatUntilTime = 0`
+  - `hasActiveHostileEngagement = false`
+  - cancel attack loops
+  - clear hostile selection
 
 ---
 
-## DUNGEON SCENE RULES (LOCKED)
+## IMPLEMENTATION CHECKLIST
 
-In `Dungeon` scenes:
-- Normal disengage rules apply.
-- PvE/PvP share the same disengage model.
-
----
-
-## UI / REPLICATION CONTRACT (NON-AUTHORITATIVE BUT REQUIRED)
-
-Clients should be able to display a correct combat indicator.
-
-Minimum replicated data per Actor:
-- `CombatState` (Peaceful/InCombat/Dead)
-- Optionally: `combatRemainingSeconds` for UI only
-
-Notes:
-- Clients must not compute combat state locally.
-
----
-
-## FAILURE MODES (LOCKED)
-
-The server must prevent these:
-
-1. **Perma-combat from selection**
-   - Selection alone never refreshes combat (v1).
-
-2. **Safe scene combat leaks**
-   - If `CombatAllowed == false`, ignore refresh requests and force Peaceful.
-
-3. **Timer desync**
-   - Combat state must be derived from server time, not client time.
-
----
-
-## IMPLEMENTATION CHECKLIST (NEXT)
-
-1. Add fields to server combat state tracker:
-   - `double combatUntilTime` (server time)
-
-2. Add server APIs:
-   - `RefreshCombatForActor(actor)`
-   - `ForcePeaceful(actor)`
-
-3. Wire refresh calls at exactly these points:
-   - After TargetIntent validation for Allowed hostile intents
-   - On CombatResolver resolution (hit/miss) and DamagePacket apply
-
-4. Add periodic evaluation:
-   - If now >= combatUntilTime and state is InCombat → set Peaceful + side-effects
-
-5. Add scene transition hook:
-   - On entering safe scenes, ForcePeaceful + cancel timers + clear hostile selection
+- Track `combatUntilTime` using server time
+- Track attacker engagement (`hasActiveHostileEngagement`) based on AttackLoop/intent state
+- Refresh only at the listed hook points
+- Force clear on safe-scene entry
 
 ---
 
 ## DESIGN LOCK CONFIRMATION
 
-This document is **authoritative**.
-
-Any change must:
-- Increment Version
-- Update Last Updated
-- Call out impacted systems (`ACTOR_MODEL`, `COMBAT_CORE`, `TARGETING_MODEL`, `SCENE_RULE_PROVIDER`, AI)
+This document is authoritative.
 
