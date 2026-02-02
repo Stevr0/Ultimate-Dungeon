@@ -1,23 +1,24 @@
-# SCRIPTS.md — Ultimate Dungeon (Current Script Inventory)
+# SCRIPTS.md — Ultimate Dungeon (Comprehensive Script Inventory)
 
-Version: 1.6  
-Last Updated: 2026-01-31
+Version: 1.7  
+Last Updated: 2026-02-02
 
 ---
 
-## PURPOSE
+## PURPOSE (LOCKED)
 
-This document lists the **scripts currently present and in active use** in *Ultimate Dungeon*.
+This document lists **ALL scripts in the Unity project** (not just high-level gameplay systems).
 
-This document is **NOT authoritative**.
+It exists so you can:
+- Attach it to Project Files for each chat
+- Quickly locate scripts by name/path
+- Track what is **active**, **spike**, **legacy**, or **editor-only**
+- Avoid “ghost scripts” silently hanging around
 
-It exists to:
-- Track what scripts currently exist
-- Describe their *current responsibilities*
-- Help with prefab/scene wiring and cleanup
-- Identify legacy, spike, or transitional systems
+This document is **NOT authoritative design**.
 
-Authoritative behavior and rules live in the design documents:
+Authoritative behavior/rules live in design docs:
+- `DOCUMENTS_INDEX.md`
 - `ACTOR_MODEL.md`
 - `TARGETING_MODEL.md`
 - `COMBAT_CORE.md`
@@ -26,275 +27,199 @@ Authoritative behavior and rules live in the design documents:
 
 ---
 
-## DESIGN CONTEXT (LOCKED)
+## HOW THIS FILE SHOULD BE MAINTAINED
 
-- Unity 6 (URP)
-- Netcode for GameObjects (NGO)
-- Server-authoritative gameplay
-- Ultima Online–style controls
-  - Right click: move / chase
-  - Left click: select target
-  - Double left click: attack / interact
+### Source of truth
+This file should be **generated** (or at least partially generated) from the project.
+Manual edits are fine for:
+- “Status” (Active / Spike / Legacy)
+- Short purpose notes
+- Wiring notes (which prefab / scene uses it)
 
----
-
-## BOOTSTRAP & NETWORKING
-
-### `NetworkHudController`
-**Purpose:** Temporary Host/Client UI for starting and stopping NGO sessions.
-
-**Notes:**
-- Debug-only
-- Will be removed once proper frontend exists
+### Update cadence
+Update after most sessions (your current workflow), so it stays accurate.
 
 ---
 
-## ACTOR CORE
+## REQUIRED COLUMNS
 
-### `ActorComponent`
-**Purpose:**
-- Server-authoritative Actor identity surface
-- Holds ActorType, FactionId, Alive/Dead state, CombatState
-
-**Notes:**
-- Required on ALL actors (Players, Monsters, NPCs, Objects)
-- CombatState is written ONLY by `CombatStateTracker`
-
----
-
-### `CombatActorFacade`
-**Purpose:**
-- Unified interface adapter (`ICombatActor`) for Combat Core
-- Exposes vitals, stats, transform, and legality gates
-
-**Notes:**
-- Consumed by CombatResolver and AttackLoop
-- Does not own combat rules
+Every script entry must include:
+- **Script** (class/file name)
+- **Path** (within Assets)
+- **Category** (Runtime / UI / Editor / Debug / Data / Networking / Tests)
+- **Status** (Active / Spike / Legacy / Deprecated)
+- **Purpose** (1 line)
+- **Notes** (optional)
 
 ---
 
-## TARGETING & INTENT
+## AUTOMATION (RECOMMENDED)
 
-### `PlayerTargeting`
-**Purpose:**
-- Holds the local player’s currently selected target
-- Emits events for UI (target rings, frames, etc.)
+You do *not* want to maintain a comprehensive list by hand.
+Below is a small **Editor utility** that exports a full inventory of `*.cs` files under `Assets/` into a Markdown file.
 
-**Notes:**
-- Local-only
-- Clearing target triggers RequestStopAttack
+### Setup
+1. Create folder: `Assets/_Scripts/Editor/`
+2. Add file: `ScriptInventoryExporter.cs`
+3. Paste the code below.
 
----
+### Usage
+In Unity:
+- Menu: **Tools → Ultimate Dungeon → Export Script Inventory**
 
-### `CombatEngageIntent`
-**Purpose:**
-- Local-only intent model for Ultima Online–style combat
-- Tracks whether the player has explicitly armed an attack
+It writes:
+- `Assets/SCRIPTS.generated.md`
 
-**Notes:**
-- Being out of range does NOT clear intent
-- Intent clears only on explicit cancel or target invalidation
+Then you can copy/paste that content into this `SCRIPTS.md` (or we can treat the generated file as the attachment).
 
----
-
-## PLAYER COMBAT CONTROL
-
-### `PlayerCombatController`
-**Purpose:**
-- Server-authoritative attack request handler
-- Validates attack intent using Targeting + Scene rules
-- Starts and stops AttackLoop
-
-**Notes:**
-- Clients submit intent only
-- Server commits exactly once
+> Tip: You can keep this `SCRIPTS.md` as the human-friendly version and attach `SCRIPTS.generated.md` for each chat.
 
 ---
 
-## COMBAT EXECUTION (SERVER)
+## ScriptInventoryExporter.cs (Editor)
 
-### `AttackLoop`
-**Purpose:**
-- Server-owned auto-attack loop (swing scheduling)
-- Repeats swings while attacker/target remain valid and in range
+```csharp
+#if UNITY_EDITOR
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using UnityEditor;
+using UnityEngine;
 
-**Notes:**
-- Range gates swings, NOT combat state
-- Loop stopping does not end combat by itself
+namespace UltimateDungeon.EditorTools
+{
+    /// <summary>
+    /// ScriptInventoryExporter
+    /// =======================
+    ///
+    /// Exports a comprehensive list of ALL *.cs files under Assets/ into Markdown.
+    ///
+    /// Why:
+    /// - Keeps SCRIPTS.md accurate without manual bookkeeping.
+    /// - Helps ChatGPT sessions by attaching a full script inventory.
+    ///
+    /// Output:
+    /// - Assets/SCRIPTS.generated.md
+    ///
+    /// Notes:
+    /// - This does NOT parse code deeply (fast + robust).
+    /// - It tries to infer category/status from folder names.
+    /// - You can tweak the heuristics to match your folder conventions.
+    /// </summary>
+    public static class ScriptInventoryExporter
+    {
+        private const string OutputPath = "Assets/SCRIPTS.generated.md";
 
----
+        [MenuItem("Tools/Ultimate Dungeon/Export Script Inventory")]
+        public static void Export()
+        {
+            try
+            {
+                // Collect all C# files under Assets (excluding Packages).
+                var files = Directory.GetFiles(Application.dataPath, "*.cs", SearchOption.AllDirectories)
+                    .Select(ToAssetsRelativePath)
+                    .Where(p => !p.Contains("/Editor Default Resources/"))
+                    .OrderBy(p => p)
+                    .ToList();
 
-### `CombatResolver`
-**Purpose:**
-- Sole authority that resolves completed combat actions
-- Applies DamagePackets and triggers death exactly once
+                var sb = new StringBuilder(64 * 1024);
 
-**Notes:**
-- Always server-only
-- v0.1: always-hit, fixed damage
+                sb.AppendLine("# SCRIPTS.generated.md — Ultimate Dungeon (Auto-Generated)");
+                sb.AppendLine();
+                sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                sb.AppendLine();
+                sb.AppendLine("This file is auto-generated. Do not hand-edit unless you plan to overwrite changes next export.");
+                sb.AppendLine();
+                sb.AppendLine("---");
+                sb.AppendLine();
 
----
+                // Group by inferred category to keep it readable.
+                var groups = files
+                    .GroupBy(InferCategory)
+                    .OrderBy(g => g.Key);
 
-### `CombatStateTracker`
-**Purpose:**
-- Server-authoritative combat state surface
-- Transitions Actor between Peaceful / InCombat / Dead
+                foreach (var g in groups)
+                {
+                    sb.AppendLine($"## {g.Key}");
+                    sb.AppendLine();
+                    sb.AppendLine("| Script | Path | Status | Notes |");
+                    sb.AppendLine("|---|---|---|---|");
 
-**Current Rules:**
-- Any hostile action refreshes combat window
-- Combat persists while AttackLoop is running OR window active
-- Combat ends only after disengage timeout
+                    foreach (var path in g)
+                    {
+                        string script = Path.GetFileNameWithoutExtension(path);
+                        string status = InferStatus(path);
+                        sb.AppendLine($"| `{script}` | `{path}` | {status} |  |");
+                    }
 
-**Notes:**
-- Loop stopping is NOT a combat-extending event
-- Scene rules may forbid entering combat
+                    sb.AppendLine();
+                }
 
----
+                File.WriteAllText(OutputPath, sb.ToString(), Encoding.UTF8);
+                AssetDatabase.Refresh();
 
-## MOVEMENT
+                Debug.Log($"[ScriptInventoryExporter] Wrote {files.Count} scripts to: {OutputPath}");
+                EditorUtility.RevealInFinder(OutputPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[ScriptInventoryExporter] Export failed: {ex}");
+            }
+        }
 
-### `ClickToMoveInput`
-**Purpose:**
-- Owner-only input collector for Ultima Online–style movement
-- Sends destination intent to server motor
+        private static string ToAssetsRelativePath(string absolute)
+        {
+            // Convert absolute path like C:/Project/Assets/Foo.cs -> Assets/Foo.cs
+            absolute = absolute.Replace('\\', '/');
+            string dataPath = Application.dataPath.Replace('\\', '/');
+            if (!absolute.StartsWith(dataPath, StringComparison.OrdinalIgnoreCase))
+                return absolute;
 
-**Notes:**
-- Right-click move does NOT cancel combat intent
-- Chasing while InCombat is supported
+            return "Assets" + absolute.Substring(dataPath.Length);
+        }
 
----
+        private static string InferCategory(string path)
+        {
+            // Heuristics based on common folder naming.
+            // Adjust to your folder structure as it evolves.
 
-### `ServerClickMoveMotor`
-**Purpose:**
-- Server-authoritative movement execution
-- Receives destination requests from clients
+            string p = path.ToLowerInvariant();
 
-**Notes:**
-- Combat does not own movement
+            if (p.Contains("/editor/") || p.EndsWith(".editor.cs")) return "Editor";
+            if (p.Contains("/debug/") || p.Contains("/tests/") || p.Contains("/test/")) return "Debug / Tests";
+            if (p.Contains("/ui/")) return "UI";
+            if (p.Contains("/network") || p.Contains("/netcode") || p.Contains("/networking")) return "Networking";
+            if (p.Contains("/items/") || p.Contains("/inventory/") || p.Contains("/affix")) return "Items / Inventory";
+            if (p.Contains("/combat/")) return "Combat";
+            if (p.Contains("/actors/") || p.Contains("/player")) return "Actors / Players";
+            if (p.Contains("/scenes/") || p.Contains("/scene")) return "Scenes";
 
----
+            return "Other";
+        }
 
-## CAMERA
+        private static string InferStatus(string path)
+        {
+            // More heuristics. Keep it simple.
+            string p = path.ToLowerInvariant();
 
-### `IsometricCameraFollow` / `TopDownCameraFollow`
-**Purpose:**
-- Simple isometric / semi-top-down camera follow
-- Uses fixed rotation (no swivel)
+            if (p.Contains("/legacy/") || p.Contains("_old") || p.Contains("deprecated")) return "Legacy";
+            if (p.Contains("/spike/") || p.Contains("_spike") || p.Contains("/temp/")) return "Spike";
 
-**Notes:**
-- Runs on CameraRig, not MainCamera
-- Implements `ICameraFollowTarget`
-
----
-
-### `LocalCameraBinder`
-**Purpose:**
-- Binds the local player transform to the camera follow script
-- Retries until local player exists (NGO-safe)
-
-**Notes:**
-- Owner-only
-- Avoids hard references between camera and player prefabs
-
----
-
-## VISUAL FEEDBACK
-
-### `HitFlash`
-**Purpose:**
-- Simple hit flash feedback on damaged actors
-
----
-
-### `DamageFeedbackReceiver`
-**Purpose:**
-- Displays floating damage numbers
-
----
-
-## STATUS & VITALS
-
-### `ActorVitals`
-**Purpose:**
-- **Single source of truth** for Actor vitals (Players + Monsters + NPCs)
-- Holds replicated current/max values for HP, Stamina, Mana
-- Server-authoritative mutation helpers
-
-**Notes:**
-- Server writes NetworkVariables; clients read
-- Combat systems should only mutate via ActorVitals server methods
-
----
-
-### `PlayerVitalsRegenServer`
-**Purpose:**
-- Server-only regeneration ticking for Players
-
-**Notes:**
-- Exists to keep `ActorVitals` generic
-
----
-
-## PLAYER RUNTIME HUB
-
-### `PlayerCore`
-**Purpose:**
-- Central runtime hub for player-only systems
-- Holds references to Stats, SkillBook, Vitals
-
-**Notes:**
-- Initializes vitals from attributes
-- Binds regen server-side
-
----
-
-## UI BINDING
-
-### `LocalPlayerUIBinder`
-**Purpose:**
-- Listens for local player spawn
-- Binds UI panels to replicated components
+            return "Active";
+        }
+    }
+}
+#endif
+```
 
 ---
 
-## HUD
+## COMPREHENSIVE SCRIPT LIST
 
-### `HudVitalsUI`
-**Purpose:**
-- Displays HP/Stamina/Mana bars and values
+> This section is intended to be the **fully enumerated list**.
+> Once you run the exporter, copy the generated Markdown here (or attach `SCRIPTS.generated.md` to chats).
 
----
-
-## HOTBAR (UI)
-
-### `HotbarUI`
-**Purpose:**
-- 10-slot hotbar presentation
-
----
-
-### `HotbarSlotUI`
-**Purpose:**
-- Visual hotbar slot
-
----
-
-### `HotbarInputRouter`
-**Purpose:**
-- Routes keyboard input 1–0 to hotbar slots
-
----
-
-## NOTES / CLEANUP
-
-- Vitals consolidation complete
-- Spike/test scripts should be clearly marked
-
----
-
-## DESIGN CONFIRMATION
-
-This document is **informational only**.
-
-Design docs always win.
+(Generated list goes here)
 
