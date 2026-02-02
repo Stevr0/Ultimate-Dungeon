@@ -1,450 +1,280 @@
-# ITEM\_DEF\_SCHEMA.md — Ultimate Dungeon (AUTHORITATIVE)
+# ITEM_DEF_SCHEMA.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.2\
-Last Updated: 2026-02-02\
-Engine: Unity 6 (URP)\
-Authority: Server-authoritative\
+Version: 1.5  
+Last Updated: 2026-02-02  
+Engine: Unity 6 (URP)  
+Authority: Server-authoritative  
 Data: ScriptableObjects-first (`ItemDef`)
 
 ---
 
 ## PURPOSE
 
-Defines the **authoritative schema** for the `ItemDef` ScriptableObject in *Ultimate Dungeon*.
+Defines the **authoritative schema** for the `ItemDef` ScriptableObject used in *Ultimate Dungeon*.
 
 This document is the single source of truth for:
-
 - What fields exist on `ItemDef`
 - Which fields are required per item family
 - Validation rules (what is illegal)
 
 This document does **not**:
-
 - List the base items (owned by `ITEM_CATALOG.md`)
 - Define affix IDs / tiers / stacking (owned by `ITEM_AFFIX_CATALOG.md`)
-- Define item system laws (owned by `ITEMS.md`)
+- Define item-system laws (owned by `ITEMS.md`)
 
 ---
 
 ## SCOPE BOUNDARIES (NO OVERLAP)
 
-### Owned elsewhere
-
-- Item identity model (ItemDef vs ItemInstance): `ITEMS.md`
-- Base item list + base stats: `ITEM_CATALOG.md`
-- Affix pools and affix definitions: `ITEM_AFFIX_CATALOG.md`
-- Combat execution rules: `COMBAT_CORE.md`
-- Spell definitions and targeting rules: `SPELL_DEF_SCHEMA.md` + `MAGIC_AND_SPELLS.md`
+Owned elsewhere:
+- Item identity + instance rules: `ITEMS.md`
+- Base item list + authored base stats: `ITEM_CATALOG.md`
+- Affix definitions, tiers, caps, pools: `ITEM_AFFIX_CATALOG.md`
+- Spell/ability IDs: `SPELL_ID_CATALOG.md`
+- Spell/ability payload + requirements: `SPELL_DEF_SCHEMA.md`
+- Status effects: `STATUS_EFFECT_CATALOG.md`
+- Combat rules: `COMBAT_CORE.md`
 
 ---
 
 ## DESIGN LOCKS (MUST ENFORCE)
 
 1. **Stable IDs**
-
-   - `ItemDefId` is stable and matches an entry in `ITEM_CATALOG.md`.
+   - `itemDefId` is stable and must be listed in `ITEM_CATALOG.md`.
 
 2. **Server authoritative**
+   - ItemDefs are authored data; runtime derives from them; server enforces.
 
-   - `ItemDef` is authored content; runtime logic reads it; server enforces.
+3. **No hidden behavior**
+   - If it affects gameplay, it must be represented as data and/or in authoritative rules docs.
 
-3. **No hidden fields**
+4. **Albion-style equipment → hotbar**
+   - Equipping an item can grant abilities.
+   - The hotbar is a projection of equipped item grants (UI does not “own” abilities).
 
-   - If a field affects gameplay, it must be represented here.
+5. **Ultima-style random properties**
+   - Randomness comes from affixes and rolled instance state.
+   - **Granted abilities are not affixes.**
 
-4. **No duplication**
+6. **Reagents are for potions (Alchemy), not spells**
+   - Spellcasting never consumes reagent items.
 
-   - Do not define item lists or affix catalogs in this schema.
+7. **Jewelry mapping**
+   - Rings equip into `Offhand`.
+   - Earrings equip into `Neck` (shared with capes/cloaks).
 
----
-
-## ITEMDEF ID RULES (LOCKED)
-
-- `ItemDefId` is a stable string.
-- All shipped IDs are append-only in `ITEM_CATALOG.md`.
-- `ItemDefId` naming convention (recommended):
-  - `weapon_<family>_<name>`
-  - `armor_<material>_<slot>_<name>`
-  - `shield_<name>`
-  - `jewel_<type>_<name>`
-  - `consumable_<name>`
-  - `reagent_<name>`
-  - `resource_<name>`
-  - `container_<name>`
-  - `mount_<name>`
+8. **Backpack lock**
+   - All equipped backpacks have exactly **48** container slots.
+   - Backpacks differ via **carry weight bonus**, not slot count.
 
 ---
 
-## CORE ITEMDEF FIELDS (AUTHORITATIVE)
+## CORE ITEMDEF FIELDS (PRESENT ON ALL ITEMS)
 
-These fields exist on every `ItemDef`.
-
-### 1) Identity
-
-- `string itemDefId` *(stable; must match ********************************************`ITEM_CATALOG.md`********************************************)*
+### Identity
+- `string itemDefId` *(stable; must exist in `ITEM_CATALOG.md`)*
 - `string displayName`
-- `ItemFamily family` *(see enum below)*
+- `ItemFamily family`
 - `string iconAddress` *(optional; UI)*
 
-### 2) Economy / Inventory
-
+### Economy / Inventory
 - `float weight`
 - `bool isStackable`
 - `int stackMax` *(required if isStackable)*
 
-### 3) Durability
-
+### Durability
 - `bool usesDurability`
 - `float durabilityMax` *(required if usesDurability)*
 
-> Jewelry durability is enabled by design lock (enforced by catalog + assets).
-
-### 4) Affix Pools
-
-- `string[] affixPoolRefs` *(names that map to ********************************************`AffixPoolDef`******************************************** assets)*
+### Affix Pools
+- `string[] affixPoolRefs` *(names that map to AffixPoolDef assets)*
 
 Rules:
-
-- Mundane items may still declare pools (so they can become magical via loot/enhance).
-- Allowed pools are validated against `ITEM_AFFIX_CATALOG.md`.
-
----
-
-## NEW: EQUIPMENT SLOT + ITEM-GRANTED ABILITIES (AUTHORITATIVE)
-
-This section enables an **Albion-style equipment → hotbar** model while preserving Ultima-style random properties.
-
-### Key Principles (LOCKED)
-
-1. **Equipment slot is explicit**
-
-   - If an item can be equipped into one of the 10 equipment slots, it declares `EquipmentData.equipSlot`.
-
-2. **Item-granted abilities are NOT affixes**
-
-   - Affixes remain the random-property system.
-   - Abilities are part of the base item identity and are selectable per item instance.
-
-3. **Selection is instance state (not ItemDef)**
-
-   - `ItemDef` declares what is possible.
-   - `ItemInstance` stores what the player chose (one active choice per granted ability slot).
-
-4. **Ability IDs reuse ****************************************************************************************`SpellId`**************************************************************************************** (v1)**
-
-   - This keeps targeting + requirements + cooldowns unified and data-driven.
-   - Non-magical “moves” (e.g., sprint, dash, taunt) are implemented as `SpellDef` entries that primarily apply statuses and/or utility payloads.
-
-> NOTE: This schema only defines fields. Hotbar binding rules live in a rules doc (future), and UI remains a projection of equipped grants.
+- Mundane items may declare pools so they can become magical through loot/enhance.
+- Pools must exist in `ITEM_AFFIX_CATALOG.md`.
 
 ---
 
-## ENUMS (AUTHORITATIVE)
-
-### ItemFamily
-
-ItemFamily is the **primary categorization** for items.
-
-Design rule (LOCKED):
-- For **equippable items**, `ItemFamily` **must match the target `EquipSlot`** (one-to-one).
-- For **non-equippable items**, `ItemFamily` uses the Non-Equip families.
-
-#### Equippable Families (must match EquipSlot)
-- `Bag`
-- `Head`
-- `Neck`
-- `Mainhand`
-- `Chest`
-- `Offhand`
-- `Potion`
-- `Foot`
-- `Food`
-- `Mount`
-
-#### Non-Equip Families
-- `Resource`
-- `Material`
-- `Reagent` *(alchemy only)*
-- `Consumable` *(non-equippable consumables, e.g. bandages, torches if not slotted)*
-- `Container` *(non-equippable containers, world containers, etc.)*
-- `Misc`
-
-> NOTE: This replaces the older Weapon/Armor/Shield/Jewelry split. Any weapon/armor specifics are now expressed via optional data blocks and tags (see below).
+## EQUIPMENT MODEL (AUTHORITATIVE)
 
 ### EquipSlot (10-slot equipment model)
-
 - `Bag`
 - `Head`
-- `Neck` *(shared slot: capes/cloaks + earrings and other neck accessories)*
+- `Neck` *(shared: capes/cloaks + earrings/amulets)*
 - `Mainhand`
 - `Chest`
 - `Offhand` *(includes Rings by design)*
-- `Potion`
+- `BeltA` *(generic quick-slot; accepts UtilityItem)*
+- `BeltB` *(generic quick-slot; accepts UtilityItem)*
 - `Foot`
-- `Food`
 - `Mount`
 
-### AbilityGrantSlot
+### ItemFamily
 
-A stable *purpose* label for what the granted ability is “about”.
+Design rule (LOCKED):
+- For equippable items, `ItemFamily` determines the allowed equip slot(s).
 
-Recommended enum values (v1):
+#### Equippable families
+- `Bag` → `EquipSlot.Bag`
+- `Head` → `EquipSlot.Head`
+- `Neck` → `EquipSlot.Neck`
+- `Mainhand` → `EquipSlot.Mainhand`
+- `Chest` → `EquipSlot.Chest`
+- `Offhand` → `EquipSlot.Offhand`
+- `Foot` → `EquipSlot.Foot`
+- `Mount` → `EquipSlot.Mount`
+- `UtilityItem` → `EquipSlot.BeltA` **or** `EquipSlot.BeltB`
 
-- `Primary`
-- `Secondary`
-- `Utility`
-
-> **Rule:** A single item may grant 1–3 slots, each of which allows selecting exactly 1 active ability.
+#### Non-equippable families
+- `Resource`
+- `Material`
+- `Reagent` *(alchemy only)*
+- `Consumable` *(non-equippable consumables)*
+- `Container` *(non-equippable containers)*
+- `Misc`
 
 ---
 
 ## EQUIPMENT DATA (AUTHORITATIVE)
 
-Optional block. Present only if the item is equippable into the 10-slot model.
+Optional block. Present only if the item is equippable.
 
 ### EquipmentData
-
-- `bool isEquippable` *(required; if true, EquipmentData must be present)*
+- `bool isEquippable`
 - `EquipSlot equipSlot`
 
-### GrantedAbilities
-
-- `GrantedAbilitySlot[] grantedAbilitySlots`
-
-Each `GrantedAbilitySlot` contains:
-
-- `AbilityGrantSlot slot` *(Primary/Secondary/Utility)*
-- `SpellId[] allowedSpellIds` *(authoring rule: 1..3 entries)*
-- `SpellId defaultSpellId` *(optional; must exist in allowedSpellIds if set)*
-
-Authoring Rules (LOCKED):
-
-- `allowedSpellIds` is an explicit curated list (no implicit “all spells by circle”).
-- A granted slot must always have at least 1 allowed spell.
-- Items may share allowed spells (e.g., swords and axes both allow `Weaken`) while still having unique options.
-
-Runtime Rules (LOCKED INTERFACE):
-
-- ItemInstance stores `SelectedSpellId per GrantedAbilitySlot`.
-- Selection may be changed only when the actor is **not in combat** (combat state is owned by combat/scene rules).
+Equip rules (LOCKED):
+- If `isEquippable == true`, `equipSlot` must be set.
+- For slot-unique families (Bag/Head/Neck/Mainhand/Chest/Offhand/Foot/Mount):
+  - `equipSlot` must match that slot.
+- For `ItemFamily.UtilityItem`:
+  - `equipSlot` may be **either** `BeltA` or `BeltB`.
+  - The same UtilityItem type may be equipped in both belt slots.
 
 ---
 
-## WEAPON DATA (AUTHORITATIVE)
+## ITEM-GRANTED ABILITIES (AUTHORITATIVE)
 
-Required when `family == Weapon`.
+### Key principles (LOCKED)
+- Granted abilities are part of base item identity.
+- Variation comes from affixes + instance rolls.
+- The player selects which ability is active per granted slot.
+- Selection is stored on the **ItemInstance**, not the ItemDef.
 
-### WeaponData
+### AbilityGrantSlot
+A stable purpose label for a granted ability choice.
 
+Recommended enum values (v1):
+- `Primary`
+- `Secondary`
+- `Utility`
+
+### GrantedAbilities
+- `GrantedAbilitySlot[] grantedAbilitySlots` *(required for equippable items; 1..3)*
+
+Each `GrantedAbilitySlot` contains:
+- `AbilityGrantSlot slot`
+- `SpellId[] allowedSpellIds` *(authoring rule: 1..3 entries)*
+- `SpellId defaultSpellId` *(optional; must be in allowedSpellIds if set)*
+
+Runtime interface rules (LOCKED):
+- ItemInstance stores `SelectedSpellId` per `AbilityGrantSlot`.
+- Selection may be changed only when the actor is **not in combat**.
+
+---
+
+## FAMILY-SPECIFIC DATA BLOCKS
+
+These blocks are **optional** at the schema level, but are **required** for specific families.
+
+### ContainerData (required for `family == Bag` or `family == Container`)
+- `int capacitySlots`
+- `bool allowNestedContainers` *(default true)*
+- `float carryWeightBonusKg` *(optional; 0 allowed)*
+
+Rules (LOCKED):
+- If item equips into `EquipSlot.Bag`:
+  - `capacitySlots` must be **48**
+  - `carryWeightBonusKg` may be > 0
+
+### WeaponData (required for `family == Mainhand`)
 - `WeaponHandedness handedness` *(MainHand / TwoHanded)*
-- `DamageType damageType` *(Physical/Fire/Cold/Poison/Energy; v1 weapons are mostly Physical)*
+- `DamageType damageType` *(Physical/Fire/Cold/Poison/Energy)*
 - `int minDamage`
 - `int maxDamage`
 - `float swingSpeedSeconds`
 - `int staminaCostPerSwing`
 - `SkillId requiredCombatSkill`
-- `float rangeMeters` *(optional; if not set, combat defaults are used)*
-
-### Ranged-only fields
-
+- `float rangeMeters` *(optional)*
 - `AmmoType ammoType` *(None/Arrow/Bolt)*
 
-#### Schema rule (LOCKED)
+Rules (LOCKED):
+- `minDamage <= maxDamage`
+- `swingSpeedSeconds > 0`
+- `staminaCostPerSwing >= 0`
+- If `ammoType != None` then `handedness == TwoHanded`
 
-- If `ammoType != None`, weapon is treated as Ranged for Combat and must be TwoHanded.
-
----
-
-## ARMOR DATA (AUTHORITATIVE)
-
-Required when `family == Armor`.
-
-### ArmorData
-
+### ArmorData (required for `family == Head` or `family == Chest` or `family == Foot` or (family == Neck AND item is a cape/cloak))
 - `ArmorMaterial material` *(Cloth/Leather/Metal)*
-- `ArmorSlot slot` *(see enum below)*
+- `ArmorSlot slot` *(Head/Torso/Feet/Back/etc.)*
 - `int resistPhysical`
 - `int resistFire`
 - `int resistCold`
 - `int resistPoison`
 - `int resistEnergy`
-- `int dexPenalty` *(may be 0; metal may be negative)*
+- `int dexPenalty` *(0 allowed)*
 
-### ArmorSlot (expanded)
+### ShieldData (required for `family == Offhand` when the item is a shield)
+- `ShieldBlockType blockType`
 
-Existing (v1.1):
+### JewelryData (required for `family == Offhand` when the item is a ring, OR `family == Neck` when the item is an earring/amulet)
+- `JewelrySlot slot` *(Ring/Earring/Amulet)*
 
-- `Head`
-- `Chest`
-- `Foot`
-- `Neck`
+Rules (LOCKED):
+- Jewelry uses durability (`usesDurability = true`).
 
-#### Resist authoring rule (LOCKED)
-
-Material baseline profiles + slot scalars are owned by `ITEM_CATALOG.md`.
-This schema simply defines the fields that store the authored results.
-
----
-
-## SHIELD DATA (AUTHORITATIVE)
-
-Required when `family == Shield`.
-
-### ShieldData
-
-- `ShieldBlockType blockType` *(Basic/Heavy/etc.)*
-
-> If shields later contribute base resists, they must do so through explicit resist fields (either ShieldData or shared resist fields). No hidden behavior.
-
----
-
-## JEWELRY DATA (AUTHORITATIVE)
-
-Required when `family == Jewelry`.
-
-### JewelryData
-- `JewelrySlot slot` *(Ring / Earring / Amulet)*
-
-Equip mapping rules (LOCKED):
-- **Rings equip into `EquipSlot.Offhand`.**
-- **Earrings equip into `EquipSlot.Neck`** *(shared with capes/cloaks).*
-- Amulets (if used) also equip into `EquipSlot.Neck`.
-
-Rules:
-- Jewelry has durability enabled (via `usesDurability=true`).
-- Jewelry has no base resists/stats by default; power comes from affixes and/or granted abilities.
-
-## CONSUMABLE DATA (AUTHORITATIVE)
-
-Required when `family == Consumable`.
-
-### ConsumableData
-
-- `ConsumableType type` *(Bandage/Food/Torch/Potion/etc.)*
+### ConsumableData (required for `family == UtilityItem` or `family == Consumable`)
+- `ConsumableType type` *(Potion/Food/Bandage/Torch/etc.)*
 - `bool isUsable`
-- `float useTimeSeconds` *(optional; v1 may be instant for some types)*
+- `float useTimeSeconds`
 
-> Potion/food can participate in equipment slots by declaring `EquipmentData.equipSlot` as `Potion` or `Food`.
+Belt rules (LOCKED):
+- Items authored as `family == UtilityItem` are equippable consumable-like items.
+- They may be equipped into either `BeltA` or `BeltB`.
 
----
+### MountData (required for `family == Mount`)
+- `float moveSpeedMultiplier` *(e.g., 1.10 = +10%)*
+- `float staminaDrainPerSecond` *(0 allowed)*
 
-## REAGENT DATA (AUTHORITATIVE)
-
-Required when `family == Reagent`.
-
-### ReagentData
+### ReagentData (required for `family == Reagent`)
 - `ReagentId reagentId`
 
 Rules (LOCKED):
-- **Reagents are for making potions (Alchemy), not spells.**
-- `ReagentId` must exist in the **potion/alchemy reagent catalog** (to be introduced as an authoritative ID catalog).
-- Spellcasting systems must not depend on `ReagentData`.
-
----
-
-## RESOURCE DATA (AUTHORITATIVE)
-
-Required when `family == Resource`.
-
-### ResourceData
-
-- `ResourceType type` *(Ore/Ingot/Leather/Cloth/Wood/etc.)*
-
----
-
-## CONTAINER DATA (AUTHORITATIVE)
-
-Required when `family == Container`.
-
-### ContainerData
-
-- `int capacitySlots`
-- `bool allowNestedContainers` *(default true)*
-
-> Bags used as equipment (EquipSlot.Bag) are simply Containers with EquipmentData.
-
----
-
-## MOUNT DATA (AUTHORITATIVE)
-
-Required when `family == Mount`.
-
-### MountData
-
-- `float moveSpeedMultiplier` *(e.g., 1.10 for +10% move speed)*
-- `float staminaDrainPerSecond` *(optional; 0 allowed)*
-
-> Mount abilities (e.g., “Charge”, “Dismount Kick”) are granted through `EquipmentData.grantedAbilitySlots` like any other item.
+- Reagents are used by **Alchemy** for potions.
+- Spellcasting systems must not depend on reagents.
 
 ---
 
 ## VALIDATION RULES (LOCKED)
 
 ### Global
-
 - `itemDefId` must exist in `ITEM_CATALOG.md`.
 - If `isStackable == true` then `stackMax > 1`.
 - If `usesDurability == true` then `durabilityMax > 0`.
-- All `affixPoolRefs` must exist as pool names in `ITEM_AFFIX_CATALOG.md`.
+- All `affixPoolRefs` must exist in `ITEM_AFFIX_CATALOG.md`.
 
-### EquipmentData
-
+### Equip legality
 - If `EquipmentData.isEquippable == true`:
-  - `EquipmentData.equipSlot` must be set.
-  - `grantedAbilitySlots.Length` must be in range `1..3`.
-  - Each `GrantedAbilitySlot.allowedSpellIds.Length` must be in range `1..3`.
-  - `defaultSpellId`, if present, must be contained in `allowedSpellIds`.
+  - If `family == UtilityItem` then `equipSlot` must be `BeltA` or `BeltB`.
+  - If `family != UtilityItem` then `equipSlot` must match the family’s slot.
 
-### Weapons
+### Granted abilities
+- Equippable items must have `grantedAbilitySlots.Length` in range `1..3`.
+- Each granted slot must have `allowedSpellIds.Length` in range `1..3`.
+- `defaultSpellId`, if set, must be within `allowedSpellIds`.
 
-- `minDamage <= maxDamage`
-- `swingSpeedSeconds > 0`
-- `staminaCostPerSwing >= 0`
-- If `ammoType != None`:
-  - `handedness == TwoHanded`
-
-### Armor
-
-- `material` and `slot` must be valid enums.
-- Resist fields must be >= 0.
-
-### Jewelry
-
-- `usesDurability == true` (enforced by content validation)
-
-### Mount
-
-- `moveSpeedMultiplier > 0`
-- `staminaDrainPerSecond >= 0`
-
----
-
-## NEXT STEPS
-
-1. Update `ITEM_CATALOG.md` to add entries for the 10-slot equipment model:
-   - Bags (Container items with `EquipSlot.Bag`)
-   - Helmets (Armor items with `EquipSlot.Head`)
-   - **Capes/Cloaks** (Armor-like accessories equipped in `EquipSlot.Neck`)
-   - Boots (Armor items with `EquipSlot.Foot`)
-   - Rings (Jewelry items with `EquipSlot.Offhand`)
-   - Earrings/Amulets (Jewelry items with `EquipSlot.Neck`)
-   - Mainhand weapons (Weapon items with `EquipSlot.Mainhand`)
-   - Offhand shields (Shield items with `EquipSlot.Offhand`)
-   - Potions (Consumable items with `EquipSlot.Potion`)
-   - Food (Consumable items with `EquipSlot.Food`)
-   - Mount items (ItemFamily.Mount with `EquipSlot.Mount`)
-
-2. Introduce an authoritative **Potion/Alchemy reagent catalog** (ID list) and ensure `ReagentId` references it.
-
-3. Update/introduce an authoritative Equipment/Hotbar rules doc to define:
-   - Which `EquipSlot` maps to which hotbar index
-   - When ability selection may change (combat gate)
-   - How multiple granted slots per item map into hotbar (Primary/Secondary/Utility)
-
-4. Add an Editor validator for:
-   - Missing/unknown IDs
-   - Invalid family field sets
-   - Invalid spell references (must exist in `SpellId` enum)
+### Backpack lock
+- If `equipSlot == Bag` then `capacitySlots == 48`.
 
 ---
 
@@ -453,8 +283,7 @@ Required when `family == Mount`.
 This document is **authoritative**.
 
 Any change must:
-
 - Increment Version
 - Update Last Updated
-- Call out save-data and tooling implications
+- Call out save-data implications
 
