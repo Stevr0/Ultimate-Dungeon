@@ -1,7 +1,7 @@
 # ITEM_CATALOG.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.2  
-Last Updated: 2026-01-28  
+Version: 2.1  
+Last Updated: 2026-02-02  
 Engine: Unity 6 (URP)  
 Authority: Server-authoritative  
 Data: ScriptableObjects-first (`ItemDef`)
@@ -14,15 +14,17 @@ This document is the **authoritative catalog of all base items** in *Ultimate Du
 
 It specifies:
 - The **full list** of `ItemDefId`s that exist in the shipped game
-- Each item’s **base stats** (weapon/armor/jewelry/etc.)
+- Each item’s **base authored values** (weight, durability, core stats)
 - Which **Affix Pools** the item may roll from when it becomes Magical
+- The item’s **equipment identity** and its **item-granted ability choices**
 
 This catalog maps 1:1 to `ItemDef` ScriptableObject assets.
 
-**Important:**
-- `ITEMS.md` defines the **system laws**.
-- `ITEM_AFFIX_CATALOG.md` defines **what can roll**.
-- This document defines **what items exist** and their **base values**.
+**Important boundaries:**
+- `ITEMS.md` defines the item system laws.
+- `ITEM_AFFIX_CATALOG.md` defines what affixes exist and how many can roll.
+- `ITEM_DEF_SCHEMA.md` defines the ItemDef fields and validation rules.
+- `SPELL_ID_CATALOG.md` + `SPELL_DEF_SCHEMA.md` define spell/ability IDs and payload rules.
 
 ---
 
@@ -32,53 +34,63 @@ This catalog maps 1:1 to `ItemDef` ScriptableObject assets.
    - `ItemDefId` values are stable.
    - Never reorder or rename shipped IDs without explicit migration.
 
-2. **Base stats are authored**
-   - Base weapon/armor numbers come from `ItemDef`, not runtime logic.
+2. **Equip slots (10-slot model)**
+   - `Bag, Head, Neck, Mainhand, Chest, Offhand, BeltA, BeltB, Foot, Mount`
 
-3. **Mundane vs Magical**
-   - Mundane items have no bonus modifiers/affixes.
-   - Magical items are created by loot or enhancement and receive affixes.
+3. **Item families**
+   - For equippable items, `ItemFamily` matches the equipment family:
+     - `Bag, Head, Neck, Mainhand, Chest, Offhand, UtilityItem, Foot, Mount`
 
-4. **Jewelry durability is enabled**
-   - Jewelry items have durability and can break like other equipment.
+   **UtilityItem rule (LOCKED):**
+   - `UtilityItem` items may be equipped into **either** `BeltA` or `BeltB`.
+   - Players may equip **any combination** (2 potions, 2 foods, potion+bandage, etc.).
 
-5. **Material-based base resist profiles are locked**
-   - Cloth, Leather, and Metal armor use locked baseline resist profiles + slot scalars.
+4. **Item-granted abilities**
+   - Each equippable item grants **1–3 selectable abilities**.
+   - Ability choices are `SpellId`s.
+   - The player’s chosen ability is stored on the **ItemInstance** (not here).
 
-6. **Archery is a separate item family**
-   - Bows/crossbows are distinct weapons.
-   - Ammunition (arrows/bolts) are separate stackable items consumed on use.
+5. **Reagents are for potions (Alchemy), not spells**
+   - Spellcasting never consumes `Reagent` items.
+
+6. **Rings are Offhand, Earrings are Neck**
+   - Rings equip into `Offhand`.
+   - Earrings equip into `Neck` (shared with capes/cloaks).
 
 7. **Catalog → Assets**
    - Every entry here must have a corresponding `ItemDef` asset.
-   - No “secret” ItemDefs outside the catalog.
+   - No “secret” ItemDefs outside this catalog.
 
 ---
 
-## ITEMDEF NAMING & ID RULES
+## ITEMDEF ID RULES
 
 Use stable string IDs:
-- `weapon_<family>_<name>`
-- `armor_<material>_<slot>_<name>`
-- `shield_<name>`
-- `jewel_<type>_<name>`
-- `consumable_<name>`
-- `reagent_<name>`
-- `resource_<name>`
-- `container_<name>`
 
-Examples:
-- `weapon_sword_katana`
-- `armor_leather_torso_tunic`
-- `jewel_ring_gold_band`
-- `reagent_pearl`
-- `resource_iron_ingot`
+### Equippable Families
+- `bag_<name>`
+- `head_<name>`
+- `neck_<name>` *(capes/cloaks + earrings/amulets)*
+- `mainhand_<weaponType>_<name>`
+- `chest_<material>_<name>`
+- `offhand_<type>_<name>` *(shields + rings)*
+- `utility_<name>` *(potions, food, bandages, torches, etc. — any belt-usable item)*
+- `foot_<material>_<name>`
+- `mount_<name>`
+
+### Non-Equip Families
+- `reagent_<name>` *(alchemy-only reagents)*
+- `material_<name>`
+- `resource_<name>`
+- `consumable_<name>` *(non-equippable consumables)*
+- `container_<name>` *(non-equippable containers)*
+- `misc_<name>`
 
 ---
 
 ## NUMERIC STATUS
 
-All numeric values below are **PROPOSED (Not Locked)** until Combat baselines are finalized.
+All numeric values below are **PROPOSED (Not Locked)** until balance passes finalize.
 
 ---
 
@@ -86,269 +98,205 @@ All numeric values below are **PROPOSED (Not Locked)** until Combat baselines ar
 
 This catalog references pool names that will become `AffixPoolDef` assets.
 
-- `Pool_Weapon_Common`
-- `Pool_Weapon_Rare`
-- `Pool_Armor_Common`
+> NOTE: Pool naming is content-facing only; the affix IDs and ranges are owned by `ITEM_AFFIX_CATALOG.md`.
+
+- `Pool_Mainhand_Common`
+- `Pool_Mainhand_Rare`
+- `Pool_Armor_Common` *(Head/Chest/Foot/Neck capes)*
 - `Pool_Armor_Rare`
-- `Pool_Shield_Common`
-- `Pool_Shield_Rare`
-- `Pool_Jewelry_Common`
-- `Pool_Jewelry_Rare`
+- `Pool_Offhand_Common` *(Shields/Rings)*
+- `Pool_Offhand_Rare`
+- `Pool_Bag_Common`
+- `Pool_Mount_Common`
 
 ---
 
-## WEAPONS — MELEE
+## ABILITY GRANTS (AUTHORING FORMAT)
 
-### Table Columns
+Each equippable item grants **1–3** selectable abilities.
 
-- `ItemDefId`
-- `Name`
-- `Handedness` (MainHand / TwoHanded)
-- `DmgType`
-- `Damage` (min–max)
-- `Swing` (sec)
-- `Stam`
-- `Skill` (Swords/Macing/Fencing)
-- `Dur`
-- `AffixPools`
+We author them as:
+- **Primary:** main identity action
+- **Secondary:** alternate action
+- **Utility:** mobility/defense/cleanse/etc.
 
-### SWORDS
-
-| ItemDefId | Name | Handedness | DmgType | Damage | Swing | Stam | Skill | Dur | AffixPools |
-|---|---|---|---|---:|---:|---:|---|---:|---|
-| weapon_sword_dagger | Dagger | MainHand | Physical | 3–6 | 1.75 | 2 | Fencing | 40 | Pool_Weapon_Common |
-| weapon_sword_shortsword | Short Sword | MainHand | Physical | 4–8 | 2.00 | 3 | Swords | 45 | Pool_Weapon_Common |
-| weapon_sword_broadsword | Broadsword | MainHand | Physical | 6–10 | 2.25 | 4 | Swords | 55 | Pool_Weapon_Common |
-| weapon_sword_longsword | Longsword | MainHand | Physical | 7–11 | 2.50 | 4 | Swords | 60 | Pool_Weapon_Rare |
-| weapon_sword_scimitar | Scimitar | MainHand | Physical | 5–9 | 2.00 | 3 | Swords | 50 | Pool_Weapon_Common |
-| weapon_sword_katana | Katana | TwoHanded | Physical | 8–12 | 2.25 | 4 | Swords | 60 | Pool_Weapon_Rare |
-
-### MACING
-
-| ItemDefId | Name | Handedness | DmgType | Damage | Swing | Stam | Skill | Dur | AffixPools |
-|---|---|---|---|---:|---:|---:|---|---:|---|
-| weapon_mace_club | Club | MainHand | Physical | 4–8 | 2.00 | 3 | Macing | 45 | Pool_Weapon_Common |
-| weapon_mace_mace | Mace | MainHand | Physical | 6–10 | 2.25 | 4 | Macing | 55 | Pool_Weapon_Common |
-| weapon_mace_warhammer | War Hammer | TwoHanded | Physical | 9–14 | 2.75 | 5 | Macing | 65 | Pool_Weapon_Rare |
-| weapon_mace_maul | Maul | TwoHanded | Physical | 10–15 | 3.00 | 6 | Macing | 70 | Pool_Weapon_Rare |
-
-### FENCING
-
-| ItemDefId | Name | Handedness | DmgType | Damage | Swing | Stam | Skill | Dur | AffixPools |
-|---|---|---|---|---:|---:|---:|---|---:|---|
-| weapon_fence_kryss | Kryss | MainHand | Physical | 5–9 | 1.75 | 3 | Fencing | 45 | Pool_Weapon_Rare |
-| weapon_fence_spear | Spear | TwoHanded | Physical | 7–12 | 2.50 | 4 | Fencing | 60 | Pool_Weapon_Common |
-| weapon_fence_warfork | War Fork | TwoHanded | Physical | 8–13 | 2.75 | 5 | Fencing | 60 | Pool_Weapon_Rare |
+Each slot lists **1–3** allowed `SpellId` choices.
 
 ---
 
-## WEAPONS — RANGED (ARCHERY)
+# EQUIPPABLE ITEMS
 
-Ranged weapons consume ammunition items.
+## BAG
 
-### Table Columns
+> Bags are Containers that equip into `Bag`.
 
-- `ItemDefId`
-- `Name`
-- `Handedness`
-- `Damage` (min–max)
-- `Swing` (sec)
-- `Stam`
-- `Skill = Archery`
-- `Dur`
-- `AmmoType` (Arrow/Bolt)
-- `AffixPools`
+Design lock:
+- **All backpacks have exactly 48 slots**.
+- Backpacks differ by their **weight capacity increase** (carry weight bonus), not slot count.
 
-| ItemDefId | Name | Handedness | Damage | Swing | Stam | Skill | Dur | AmmoType | AffixPools |
-|---|---|---|---:|---:|---:|---|---:|---|---|
-| weapon_bow_shortbow | Short Bow | TwoHanded | 6–10 | 2.50 | 4 | Archery | 55 | Arrow | Pool_Weapon_Common |
-| weapon_bow_longbow | Long Bow | TwoHanded | 7–12 | 2.75 | 5 | Archery | 60 | Arrow | Pool_Weapon_Rare |
-| weapon_bow_crossbow | Crossbow | TwoHanded | 8–13 | 3.00 | 6 | Archery | 65 | Bolt | Pool_Weapon_Rare |
-| weapon_bow_heavycrossbow | Heavy Crossbow | TwoHanded | 10–15 | 3.25 | 7 | Archery | 70 | Bolt | Pool_Weapon_Rare |
+| ItemDefId | Name | Weight | Dur | CapacitySlots | CarryWeightBonusKg | Granted Abilities (choose 1 per slot) | AffixPools |
+|---|---|---:|---:|---:|---:|---|---|
+| bag_worn_pack | Worn Pack | 1.0 | 60 | 48 | 10 | Utility: {CreateFood, NightSight, Telekinesis} | Pool_Bag_Common |
+| bag_traveler_pack | Traveler Pack | 1.2 | 70 | 48 | 20 | Utility: {NightSight, Telekinesis, Unlock} | Pool_Bag_Common |
+| bag_mercenary_pack | Mercenary Pack | 1.4 | 80 | 48 | 30 | Utility: {Telekinesis, Unlock, MagicLock} | Pool_Bag_Common |
 
 ---
 
-## AMMUNITION
+## HEAD
 
-Ammunition is **consumed on use** (hit or miss), resolved in Combat.
+> Head items are armor pieces.
 
-| ItemDefId | Name | AmmoType | DamageBonus | StackMax | Weight |
-|---|---|---|---:|---:|---:|
-| ammo_arrow | Arrow | Arrow | +0 | 200 | 0.01 |
-| ammo_bolt | Crossbow Bolt | Bolt | +0 | 200 | 0.01 |
-
----
-
-## ARMOR — MATERIAL BASE RESIST PROFILES (LOCKED)
-
-Armor base resists are authored using a two-step model:
-
-1) **Material Profile** (locked baseline per material)
-2) **Slot Scalar** (locked)
-
-### Profile Values (LOCKED)
-
-| Material | Physical | Fire | Cold | Poison | Energy |
-|---|---:|---:|---:|---:|---:|
-| Cloth | 6 | 2 | 2 | 2 | 2 |
-| Leather | 10 | 4 | 4 | 4 | 4 |
-| Metal | 14 | 6 | 6 | 6 | 6 |
-
-### Slot Scalars (LOCKED)
-
-| Slot | Scalar |
-|---|---:|
-| Head | 0.12 |
-| Torso | 0.30 |
-| Arms | 0.16 |
-| Hands | 0.10 |
-| Legs | 0.22 |
-| NeckArmor | 0.10 |
-
-### Authoring Rule (LOCKED)
-
-For each armor piece:
-- `PieceResist[type] = round(Profile[type] * SlotScalar)`
-
-The tables below follow this rule.
+| ItemDefId | Name | Weight | Dur | Material | Resists (P/F/C/Po/E) | DexPenalty | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---|---:|---|---|
+| head_cloth_hood | Cloth Hood | 0.5 | 40 | Cloth | 1/1/1/1/1 | 0 | Utility: {NightSight, Protection, ReactiveArmor} | Pool_Armor_Common |
+| head_leather_cap | Leather Cap | 0.7 | 55 | Leather | 2/1/1/2/1 | 0 | Utility: {Protection, ReactiveArmor, Cure} | Pool_Armor_Common |
+| head_metal_helm | Metal Helm | 1.2 | 80 | Metal | 3/1/2/2/1 | -1 | Utility: {ReactiveArmor, MagicReflection, Protection} | Pool_Armor_Common |
 
 ---
 
-## ARMOR — CLOTH (FULL SET)
+## NECK (Capes/Cloaks + Earrings)
 
-| ItemDefId | Name | Material | Slot | Resists (P/F/C/Po/E) | DexPen | Dur | AffixPools |
-|---|---|---|---|---|---:|---:|---|
-| armor_cloth_head_hood | Cloth Hood | Cloth | Head | 1/0/0/0/0 | 0 | 25 | Pool_Armor_Common |
-| armor_cloth_torso_robe | Cloth Robe | Cloth | Torso | 2/1/1/1/1 | 0 | 35 | Pool_Armor_Rare |
-| armor_cloth_arms_sleeves | Cloth Sleeves | Cloth | Arms | 1/0/0/0/0 | 0 | 25 | Pool_Armor_Common |
-| armor_cloth_hands_gloves | Cloth Gloves | Cloth | Hands | 1/0/0/0/0 | 0 | 20 | Pool_Armor_Common |
-| armor_cloth_legs_pants | Cloth Pants | Cloth | Legs | 1/0/0/0/0 | 0 | 30 | Pool_Armor_Common |
-| armor_cloth_neck_scarf | Cloth Scarf | Cloth | NeckArmor | 1/0/0/0/0 | 0 | 20 | Pool_Armor_Common |
+> `Neck` is a shared slot.
 
----
+### Capes / Cloaks
 
-## ARMOR — LEATHER (FULL SET)
+| ItemDefId | Name | Weight | Dur | Type | Resists (P/F/C/Po/E) | DexPenalty | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---|---:|---|---|
+| neck_cloth_cape | Cloth Cape | 0.4 | 35 | Cape | 0/1/1/0/0 | 0 | Utility: {Incognito, Invisibility, Reveal} | Pool_Armor_Common |
+| neck_leather_cloak | Leather Cloak | 0.6 | 50 | Cloak | 1/1/0/1/0 | 0 | Utility: {Invisibility, Reveal, Protection} | Pool_Armor_Common |
+| neck_metal_mantle | Metal Mantle | 0.9 | 70 | Mantle | 2/0/1/1/0 | -1 | Utility: {MagicReflection, Protection, ReactiveArmor} | Pool_Armor_Common |
 
-| ItemDefId | Name | Material | Slot | Resists (P/F/C/Po/E) | DexPen | Dur | AffixPools |
-|---|---|---|---|---|---:|---:|---|
-| armor_leather_head_cap | Leather Cap | Leather | Head | 1/0/0/0/0 | 0 | 35 | Pool_Armor_Common |
-| armor_leather_torso_tunic | Leather Tunic | Leather | Torso | 3/1/1/1/1 | 0 | 45 | Pool_Armor_Rare |
-| armor_leather_arms_sleeves | Leather Sleeves | Leather | Arms | 2/1/1/1/1 | 0 | 40 | Pool_Armor_Common |
-| armor_leather_hands_gloves | Leather Gloves | Leather | Hands | 1/0/0/0/0 | 0 | 30 | Pool_Armor_Common |
-| armor_leather_legs_leggings | Leather Leggings | Leather | Legs | 2/1/1/1/1 | 0 | 45 | Pool_Armor_Common |
-| armor_leather_neck_gorget | Leather Gorget | Leather | NeckArmor | 1/0/0/0/0 | 0 | 35 | Pool_Armor_Common |
+### Earrings
+
+| ItemDefId | Name | Weight | Dur | JewelryType | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---|---|
+| neck_earrings_copper | Copper Earrings | 0.1 | 30 | Earring | Utility: {Cure, Heal, NightSight} | Pool_Offhand_Common |
+| neck_earrings_silver | Silver Earrings | 0.1 | 40 | Earring | Utility: {Heal, GreaterHeal, Cure} | Pool_Offhand_Common |
+| neck_earrings_gold | Gold Earrings | 0.1 | 50 | Earring | Utility: {Protection, MagicReflection, GreaterHeal} | Pool_Offhand_Rare |
 
 ---
 
-## ARMOR — METAL (FULL SET)
+## MAINHAND
 
-Metal armor includes Dexterity penalties (PROPOSED).
+> Mainhand items are weapons.
 
-| ItemDefId | Name | Material | Slot | Resists (P/F/C/Po/E) | DexPen | Dur | AffixPools |
-|---|---|---|---|---|---:|---:|---|
-| armor_metal_head_helm | Metal Helm | Metal | Head | 2/1/1/1/1 | -1 | 55 | Pool_Armor_Common |
-| armor_metal_torso_chestplate | Metal Chestplate | Metal | Torso | 4/2/2/2/2 | -2 | 70 | Pool_Armor_Rare |
-| armor_metal_arms_arms | Metal Arms | Metal | Arms | 2/1/1/1/1 | -1 | 60 | Pool_Armor_Common |
-| armor_metal_hands_gauntlets | Metal Gauntlets | Metal | Hands | 1/1/1/1/1 | -1 | 55 | Pool_Armor_Common |
-| armor_metal_legs_greaves | Metal Greaves | Metal | Legs | 3/1/1/1/1 | -2 | 65 | Pool_Armor_Common |
-| armor_metal_neck_gorget | Metal Gorget | Metal | NeckArmor | 1/1/1/1/1 | -1 | 55 | Pool_Armor_Common |
+### Swords
 
----
+| ItemDefId | Name | Weight | Dur | Handed | Damage | Swing | Stam | Skill | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---:|---:|---:|---|---|---|
+| mainhand_sword_dagger | Dagger | 1.0 | 40 | MainHand | 3–6 | 1.75 | 2 | Fencing | Primary: {Harm, MagicArrow}; Utility: {Weaken, Clumsy} | Pool_Mainhand_Common |
+| mainhand_sword_shortsword | Short Sword | 1.6 | 45 | MainHand | 4–8 | 2.00 | 3 | Swords | Primary: {MagicArrow, Fireball}; Utility: {Weaken, Strength} | Pool_Mainhand_Common |
+| mainhand_sword_katana | Katana | 2.2 | 65 | TwoHanded | 6–12 | 2.25 | 4 | Swords | Primary: {Fireball, Lightning}; Utility: {Bless, Protection} | Pool_Mainhand_Rare |
 
-## SHIELDS
+### Axes (shares some abilities; keeps unique options)
 
-| ItemDefId | Name | BlockType | Dur | AffixPools |
-|---|---|---|---:|---|
-| shield_wooden_buckler | Wooden Buckler | Basic | 45 | Pool_Shield_Common |
-| shield_metal_heatershield | Heater Shield | Heavy | 65 | Pool_Shield_Rare |
+| ItemDefId | Name | Weight | Dur | Handed | Damage | Swing | Stam | Skill | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---:|---:|---:|---|---|---|
+| mainhand_axe_hatchet | Hatchet | 2.0 | 55 | MainHand | 5–9 | 2.25 | 4 | Macing | Primary: {Fireball, Harm}; Utility: {Weaken, Curse} | Pool_Mainhand_Common |
+| mainhand_axe_battleaxe | Battle Axe | 3.5 | 80 | TwoHanded | 8–14 | 2.75 | 6 | Macing | Primary: {Lightning, Explosion}; Utility: {Curse, Bless} | Pool_Mainhand_Rare |
 
 ---
 
-## JEWELRY (DURABILITY ENABLED)
+## CHEST
 
-Jewelry has no base combat stats; power comes from magical affixes.
+> Chest items are the primary armor body piece.
 
-| ItemDefId | Name | Slot | Dur | AffixPools |
-|---|---|---|---:|---|
-| jewel_ring_gold_band | Gold Ring | Ring | 30 | Pool_Jewelry_Common |
-| jewel_ring_silver_band | Silver Ring | Ring | 30 | Pool_Jewelry_Common |
-| jewel_amulet_silver | Silver Amulet | Amulet | 30 | Pool_Jewelry_Rare |
-| jewel_amulet_gold | Gold Amulet | Amulet | 35 | Pool_Jewelry_Rare |
-| jewel_earrings_silver | Silver Earrings | Earrings | 25 | Pool_Jewelry_Common |
-| jewel_earrings_gold | Gold Earrings | Earrings | 25 | Pool_Jewelry_Rare |
+| ItemDefId | Name | Weight | Dur | Material | Resists (P/F/C/Po/E) | DexPenalty | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---|---:|---|---|
+| chest_cloth_robe | Cloth Robe | 1.0 | 45 | Cloth | 2/2/2/2/2 | 0 | Primary: {ReactiveArmor, MagicReflection}; Utility: {Protection, Bless} | Pool_Armor_Common |
+| chest_leather_tunic | Leather Tunic | 1.8 | 70 | Leather | 4/2/2/4/2 | 0 | Primary: {Protection, Agility}; Utility: {Cure, Bless} | Pool_Armor_Common |
+| chest_metal_cuirass | Metal Cuirass | 3.0 | 100 | Metal | 6/2/3/4/2 | -2 | Primary: {MagicReflection, ReactiveArmor}; Utility: {Strength, Bless} | Pool_Armor_Rare |
 
 ---
 
-## CONSUMABLES
+## OFFHAND (Shields + Rings)
 
-(These are mundane, unless later you add potion/scroll magic systems.)
+### Shields
 
-| ItemDefId | Name | StackMax | Weight | Notes |
-|---|---|---:|---:|---|
-| consumable_bandage | Bandage | 50 | 0.01 | Used by Healing skill (later) |
-| consumable_torch | Torch | 20 | 0.25 | Light source |
-| consumable_food_ration | Food Ration | 20 | 0.25 | Simple food item |
+| ItemDefId | Name | Weight | Dur | BlockType | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---|---|
+| offhand_shield_buckler | Buckler | 2.0 | 70 | Basic | Utility: {Protection, ReactiveArmor, ArchProtection} | Pool_Offhand_Common |
+| offhand_shield_kite | Kite Shield | 3.0 | 90 | Heavy | Utility: {Protection, MagicReflection, ArchProtection} | Pool_Offhand_Common |
 
----
+### Rings (equip into Offhand)
 
-## REAGENTS (FOR SPELLCASTING)
-
-These correspond to `ReagentId` in your spell schema.
-
-| ItemDefId | Name | StackMax | Weight |
-|---|---|---:|---:|
-| reagent_pearl | Pearl | 200 | 0.01 |
-| reagent_moss | Moss | 200 | 0.01 |
-| reagent_garlic | Garlic | 200 | 0.01 |
-| reagent_ginseng | Ginseng | 200 | 0.01 |
-| reagent_root | Root | 200 | 0.01 |
-| reagent_shade | Shade | 200 | 0.01 |
-| reagent_ash | Ash | 200 | 0.01 |
-| reagent_silk | Silk | 200 | 0.01 |
+| ItemDefId | Name | Weight | Dur | JewelryType | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---|---|
+| offhand_ring_copper_band | Copper Band | 0.1 | 30 | Ring | Utility: {Agility, Strength, Cunning} | Pool_Offhand_Common |
+| offhand_ring_silver_band | Silver Band | 0.1 | 40 | Ring | Utility: {Bless, Protection, Cunning} | Pool_Offhand_Common |
+| offhand_ring_gold_band | Gold Band | 0.1 | 50 | Ring | Utility: {MagicReflection, Bless, Protection} | Pool_Offhand_Rare |
 
 ---
 
-## RESOURCES (CRAFTING)
+## UTILITYITEM (BeltA / BeltB)
 
-| ItemDefId | Name | StackMax | Weight | Notes |
-|---|---|---:|---:|---|
-| resource_iron_ore | Iron Ore | 200 | 0.05 | Smelt into ingots |
-| resource_iron_ingot | Iron Ingot | 200 | 0.05 | Blacksmithing base |
-| resource_leather | Leather | 200 | 0.02 | Tailoring base |
-| resource_cloth | Cloth | 200 | 0.02 | Tailoring base |
-| resource_wood_log | Wood Log | 200 | 0.05 | Craft boards/shafts |
-| resource_wood_board | Wood Board | 200 | 0.03 | Carpentry base (later) |
-| resource_feather | Feather | 500 | 0.001 | Arrow crafting |
-| resource_arrow_shaft | Arrow Shaft | 500 | 0.001 | Arrow crafting |
+> `BeltA` and `BeltB` are generic quick-slots.
+> Any item with `ItemFamily = UtilityItem` can be equipped into **either** slot.
 
----
-
-## CONTAINERS
-
-| ItemDefId | Name | Capacity | Weight | Notes |
-|---|---|---:|---:|---|
-| container_backpack | Backpack | 50 slots | 1.0 | Player root inventory |
-| container_pouch | Pouch | 10 slots | 0.2 | Small container |
-| container_bag | Bag | 20 slots | 0.5 | Medium container |
-| container_chest_wood | Wooden Chest | 60 slots | 5.0 | World container |
+| ItemDefId | Name | Kind | Weight | Stackable | StackMax | UseTime | Granted Abilities | AffixPools |
+|---|---|---|---:|---|---:|---:|---|---|
+| utility_lesser_heal_potion | Lesser Heal Potion | Potion | 0.2 | Yes | 10 | 0.5s | Primary: {Heal, GreaterHeal} | *(none)* |
+| utility_cure_potion | Cure Potion | Potion | 0.2 | Yes | 10 | 0.5s | Primary: {Cure, ArchCure} | *(none)* |
+| utility_refresh_potion | Refresh Potion | Potion | 0.2 | Yes | 10 | 0.5s | Utility: {Agility, Bless} | *(none)* |
+| utility_bread | Bread | Food | 0.3 | Yes | 20 | 1.0s | Utility: {Heal, Bless} | *(none)* |
+| utility_cooked_meat | Cooked Meat | Food | 0.4 | Yes | 20 | 1.0s | Utility: {Strength, Heal} | *(none)* |
+| utility_bandage | Bandage | Bandage | 0.1 | Yes | 50 | 1.5s | Primary: {Heal, GreaterHeal} | *(none)* |
+| utility_torch | Torch | Utility | 0.8 | No | 1 | 0.2s | Utility: {NightSight, Reveal} | *(none)* |
 
 ---
 
-## CONTENT AUTHORING WORKFLOW (RECOMMENDED)
+## FOOT
 
-1. Maintain this catalog as the **design source-of-truth**.
-2. Create one `ItemDef` asset per entry.
-3. Add an editor validator to ensure:
-   - Every `ItemDefId` in assets exists in this doc
-   - No duplicate IDs
-   - No missing required fields
+> Boots are armor pieces that equip into `Foot`.
+
+| ItemDefId | Name | Weight | Dur | Material | Resists (P/F/C/Po/E) | DexPenalty | Granted Abilities | AffixPools |
+|---|---|---:|---:|---|---|---:|---|---|
+| foot_cloth_shoes | Cloth Shoes | 0.5 | 40 | Cloth | 1/1/1/1/1 | 0 | Utility: {Agility, Teleport, Bless} | Pool_Armor_Common |
+| foot_leather_boots | Leather Boots | 0.8 | 60 | Leather | 2/1/1/2/1 | 0 | Utility: {Agility, Teleport, Invisibility} | Pool_Armor_Common |
+| foot_metal_greaves | Metal Greaves | 1.5 | 85 | Metal | 3/1/2/2/1 | -1 | Utility: {Strength, Protection, Teleport} | Pool_Armor_Common |
+
+---
+
+## MOUNT
+
+> Mount is an equippable mount item.
+
+| ItemDefId | Name | Weight | Dur | MoveSpeedMult | StaminaDrain/s | Granted Abilities | AffixPools |
+|---|---|---:|---:|---:|---:|---|---|
+| mount_pack_mule | Pack Mule | 0.0 | 100 | 1.05 | 0.0 | Utility: {CreateFood, NightSight} | Pool_Mount_Common |
+| mount_riding_horse | Riding Horse | 0.0 | 120 | 1.10 | 0.0 | Utility: {Agility, Bless} | Pool_Mount_Common |
+| mount_war_horse | War Horse | 0.0 | 140 | 1.12 | 0.0 | Utility: {Protection, Bless, ArchProtection} | Pool_Mount_Common |
+
+---
+
+# NON-EQUIPPABLE ITEMS (STARTER)
+
+## REAGENTS (ALCHEMY ONLY)
+
+| ItemDefId | Name | Weight | Stackable | StackMax |
+|---|---|---:|---|---:|
+| reagent_ginseng | Ginseng | 0.01 | Yes | 100 |
+| reagent_garlic | Garlic | 0.01 | Yes | 100 |
+| reagent_nightshade | Nightshade | 0.01 | Yes | 100 |
+
+---
+
+## MATERIALS / RESOURCES (STARTER)
+
+| ItemDefId | Name | Weight | Stackable | StackMax |
+|---|---|---:|---|---:|
+| material_iron_ingot | Iron Ingot | 0.10 | Yes | 100 |
+| material_leather | Leather | 0.05 | Yes | 200 |
+| material_cloth | Cloth | 0.05 | Yes | 200 |
 
 ---
 
 ## DESIGN LOCK CONFIRMATION
 
-This document is **authoritative** for the item list.
+This document is **authoritative**.
 
-Numeric balance values may remain **Proposed** until Combat baselines are locked.
-When you lock numbers, increment version and note the change.
+Any change must:
+- Increment Version
+- Update Last Updated
+- Maintain stable IDs (migration required for changes)
 
