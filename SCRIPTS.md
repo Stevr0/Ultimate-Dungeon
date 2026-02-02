@@ -217,11 +217,8 @@ Authoritative behavior and rules live in the design documents:
 ### `ActorVitals`
 **Purpose:**
 - **Single source of truth** for Actor vitals (Players + Monsters + NPCs)
-- Holds replicated current/max values for:
-  - HP
-  - Stamina
-  - Mana
-- Server-authoritative mutation helpers (damage/heal/spend/restore)
+- Holds replicated current/max values for HP, Stamina, Mana
+- Server-authoritative mutation helpers
 
 **Notes:**
 - Server writes NetworkVariables; clients read
@@ -232,10 +229,9 @@ Authoritative behavior and rules live in the design documents:
 ### `PlayerVitalsRegenServer`
 **Purpose:**
 - Server-only regeneration ticking for Players
-- Reads regen rates from `PlayerDefinition` and restores vitals on `ActorVitals`
 
 **Notes:**
-- Exists to keep `ActorVitals` generic (so monsters can have different regen rules)
+- Exists to keep `ActorVitals` generic
 
 ---
 
@@ -244,13 +240,11 @@ Authoritative behavior and rules live in the design documents:
 ### `PlayerCore`
 **Purpose:**
 - Central runtime hub for player-only systems
-- Holds key references (Stats, SkillBook, Vitals)
-- Runs server-authoritative initialization using `PlayerDefinition`
+- Holds references to Stats, SkillBook, Vitals
 
 **Notes:**
-- Vitals are now `ActorVitals` (not PlayerVitals)
-- Initializes max vitals from attributes (HP=STR, Stamina=DEX, Mana=INT) clamped to `vitalCap`
-- Binds/enables `PlayerVitalsRegenServer` (server only)
+- Initializes vitals from attributes
+- Binds regen server-side
 
 ---
 
@@ -259,11 +253,7 @@ Authoritative behavior and rules live in the design documents:
 ### `LocalPlayerUIBinder`
 **Purpose:**
 - Listens for local player spawn
-- Binds UI panels to the local player’s replicated components
-
-**Current Bindings:**
-- HUD vitals bind to `ActorVitals`
-- Character stats panel binds to `PlayerStatsNet` (if present)
+- Binds UI panels to replicated components
 
 ---
 
@@ -271,50 +261,34 @@ Authoritative behavior and rules live in the design documents:
 
 ### `HudVitalsUI`
 **Purpose:**
-- Displays HP/Stamina/Mana bars and values for the local player
-
-**Notes:**
-- Binds to `ActorVitals` only
-- Subscribes to vitals NetworkVariable changes for immediate UI updates
+- Displays HP/Stamina/Mana bars and values
 
 ---
 
-## HOTBAR (UI) — NEW
+## HOTBAR (UI)
 
 ### `HotbarUI`
 **Purpose:**
-- 10-slot hotbar UI presentation
-- Raises `SlotActivated(slotIndex)` events for systems to hook into
-
-**Notes:**
-- UI-only (does not perform server actions)
-- Intended to be the activation surface for boot sprint, potions, spells, etc.
+- 10-slot hotbar presentation
 
 ---
 
 ### `HotbarSlotUI`
 **Purpose:**
-- Visual representation of a hotbar slot
-- Shows icon + key label
-- Clickable and provides simple pulse feedback
+- Visual hotbar slot
 
 ---
 
 ### `HotbarInputRouter`
 **Purpose:**
-- Routes keyboard input **1–0** to hotbar slot activations
-- Supports both Input backends:
-  - New Input System (`ENABLE_INPUT_SYSTEM`)
-  - Legacy Input (`Input.GetKeyDown`)
+- Routes keyboard input 1–0 to hotbar slots
 
 ---
 
 ## NOTES / CLEANUP
 
-- **Vitals consolidation:** `PlayerVitals` and `PlayerVitalsNet` were removed in favor of `ActorVitals`.
-- This document intentionally includes spike and early-pass systems.
-- Legacy or test scripts should be marked clearly or removed.
-- If a rule is not defined in the authoritative docs, it does not exist.
+- Vitals consolidation complete
+- Spike/test scripts should be clearly marked
 
 ---
 
@@ -322,10 +296,5 @@ Authoritative behavior and rules live in the design documents:
 
 This document is **informational only**.
 
-Any conflict between this file and:
-- `ACTOR_MODEL.md`
-- `TARGETING_MODEL.md`
-- `COMBAT_CORE.md`
-
-The design docs win.
+Design docs always win.
 
