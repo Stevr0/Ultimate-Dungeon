@@ -69,6 +69,12 @@ namespace UltimateDungeon.UI
             "methods, or later replace the reflection with a typed call.")]
         [SerializeField] private MonoBehaviour ItemGrantedAbilitiesPanelUI;
 
+        [Header("Window Controls")]
+        [Tooltip("Optional cancel/close button that closes the parent Window_ItemDetails.")]
+        [SerializeField] private Button cancelButton;
+
+        [Tooltip("Optional explicit UIWindow reference. If omitted, we will search in parents.")]
+        [SerializeField] private UIWindow targetWindow;
 
         private ItemDefCatalog _catalog;
 
@@ -84,17 +90,29 @@ namespace UltimateDungeon.UI
 
         private void Awake()
         {
+            if (targetWindow == null)
+                targetWindow = GetComponentInParent<UIWindow>();
+
             Hide();
         }
 
         private void OnEnable()
         {
+            if (cancelButton != null)
+            {
+                cancelButton.onClick.RemoveListener(HandleCancelClicked);
+                cancelButton.onClick.AddListener(HandleCancelClicked);
+            }
+
             if (grantedAbilitiesPanelTyped != null)
                 grantedAbilitiesPanelTyped.OnSelectionChanged += HandleAbilitySelectionChanged;
         }
 
         private void OnDisable()
         {
+            if (cancelButton != null)
+                cancelButton.onClick.RemoveListener(HandleCancelClicked);
+
             if (grantedAbilitiesPanelTyped != null)
                 grantedAbilitiesPanelTyped.OnSelectionChanged -= HandleAbilitySelectionChanged;
         }
@@ -138,6 +156,17 @@ namespace UltimateDungeon.UI
             TryInvokeHide(ItemGrantedAbilitiesPanelUI);
 
 
+        }
+
+        private void HandleCancelClicked()
+        {
+            if (targetWindow != null)
+            {
+                targetWindow.RequestClose();
+                return;
+            }
+
+            gameObject.SetActive(false);
         }
 
 
@@ -196,7 +225,7 @@ namespace UltimateDungeon.UI
             if (_currentDef == null || _currentInstance == null)
                 return;
 
-            // Use the instance’s validation rules (allowedSpellIds, slot exists, etc.)
+            // Use the instances validation rules (allowedSpellIds, slot exists, etc.)
             bool ok = _currentInstance.TrySetSelectedSpellId(_currentDef, slot, chosen);
 
             if (!ok)
