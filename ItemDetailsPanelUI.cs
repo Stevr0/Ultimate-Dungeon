@@ -38,6 +38,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UltimateDungeon.Items;
+using UltimateDungeon.Spells;
 
 namespace UltimateDungeon.UI
 {

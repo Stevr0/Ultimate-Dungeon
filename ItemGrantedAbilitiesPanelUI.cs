@@ -41,6 +41,7 @@ using UnityEngine;
 namespace UltimateDungeon.UI
 {
     using UltimateDungeon.Items;
+    using UltimateDungeon.Spells;
 
     [DisallowMultipleComponent]
     public sealed class ItemGrantedAbilitiesPanelUI : MonoBehaviour

@@ -1,5 +1,5 @@
 // ============================================================================
-// ItemDef.cs — Ultimate Dungeon (AUTHORITATIVE SCHEMA)
+// ItemDef.cs ï¿½ Ultimate Dungeon (AUTHORITATIVE SCHEMA)
 // ----------------------------------------------------------------------------
 // Aligns with:
 // - ITEM_DEF_SCHEMA.md (v1.5)
@@ -28,6 +28,8 @@
 
 using System;
 using UnityEngine;
+using UltimateDungeon.Skills;
+using UltimateDungeon.Spells;
 
 namespace UltimateDungeon.Items
 {
@@ -79,7 +81,7 @@ namespace UltimateDungeon.Items
         public EquipmentData equipment;
 
         [Header("Item-Granted Abilities (equippable only)")]
-        [Tooltip("Equippable items should grant 1–3 ability choice slots.")]
+        [Tooltip("Equippable items should grant 1ï¿½3 ability choice slots.")]
         public GrantedAbilities grantedAbilities;
 
         // --------------------------------------------------------------------
@@ -596,19 +598,4 @@ namespace UltimateDungeon.Items
         Utility = 4,
     }
 
-    // ------------------------------------------------------------------------
-    // PLACEHOLDER IDS
-    // ------------------------------------------------------------------------
-    // These identifiers are owned by their own catalogs/schemas. If you already
-    // have authoritative enums defined elsewhere in the project, DELETE these
-    // placeholders and update ItemDef to reference your authoritative types.
-
-    public enum SkillId { None = 0 }
-    public enum ReagentId { None = 0 }
-
-    /// <summary>
-    /// Placeholder SpellId.
-    /// If you later add SPELL_ID_CATALOG-backed code, replace this type.
-    /// </summary>
-    public enum SpellId { None = 0 }
 }

@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using UltimateDungeon.Spells;
 
 namespace UltimateDungeon.Items
 {
