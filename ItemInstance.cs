@@ -81,6 +81,15 @@ namespace UltimateDungeon.Items
         /// </summary>
         public List<GrantedAbilitySelection> grantedAbilitySelections = new List<GrantedAbilitySelection>();
 
+        /// <summary>
+        /// Which AbilityGrantSlot is currently active on the hotbar for this item.
+        ///
+        /// IMPORTANT:
+        /// - This is per-instance configuration.
+        /// - Changes are blocked during combat by the authoritative caller (not here).
+        /// </summary>
+        public AbilityGrantSlot activeGrantSlot = AbilityGrantSlot.Primary;
+
         // --------------------------------------------------------------------
         // Container contents (RUNTIME-ONLY FOR NOW)
         // --------------------------------------------------------------------
@@ -143,6 +152,7 @@ namespace UltimateDungeon.Items
 
             // Item-granted ability selections start from ItemDef defaults.
             EnsureGrantedAbilityDefaults(def);
+            EnsureActiveGrantSlotDefault(def);
 
             // Container contents:
             // - Non-container items: keep null (no allocation, avoids deep graphs)
@@ -228,6 +238,9 @@ namespace UltimateDungeon.Items
             // Item-granted ability selections must match the def.
             SanitizeGrantedAbilitySelections(def);
 
+            // Ensure active grant slot remains valid for this def.
+            EnsureActiveGrantSlotDefault(def);
+
             // Container contents:
             // Keep runtime-only. For v1, we ensure non-containers don't hold allocations.
             if (def.family != ItemFamily.Container)
@@ -278,6 +291,37 @@ namespace UltimateDungeon.Items
 
             // Fallback: def default.
             return GetDefaultSpellIdFromDef(def, slot);
+        }
+
+        /// <summary>
+        /// Resolve the active AbilityGrantSlot for this instance.
+        ///
+        /// If allowUpdate is false (e.g., during combat) we do NOT mutate state.
+        /// </summary>
+        public bool TryResolveActiveGrantSlot(ItemDef def, bool allowUpdate, out AbilityGrantSlot slot)
+        {
+            slot = AbilityGrantSlot.Primary;
+
+            if (def == null)
+                return false;
+
+            var granted = def.grantedAbilities.grantedAbilitySlots;
+            if (granted == null || granted.Length == 0)
+                return false;
+
+            if (IsGrantSlotAllowed(granted, activeGrantSlot))
+            {
+                slot = activeGrantSlot;
+                return true;
+            }
+
+            if (!allowUpdate)
+                return false;
+
+            // Fall back to the first available slot and persist (not during combat).
+            slot = granted[0].slot;
+            activeGrantSlot = slot;
+            return true;
         }
 
         /// <summary>
@@ -526,6 +570,35 @@ namespace UltimateDungeon.Items
             }
 
             return SpellId.None;
+        }
+
+        private void EnsureActiveGrantSlotDefault(ItemDef def)
+        {
+            if (def == null)
+                return;
+
+            var granted = def.grantedAbilities.grantedAbilitySlots;
+            if (granted == null || granted.Length == 0)
+                return;
+
+            if (IsGrantSlotAllowed(granted, activeGrantSlot))
+                return;
+
+            activeGrantSlot = granted[0].slot;
+        }
+
+        private static bool IsGrantSlotAllowed(GrantedAbilitySlot[] granted, AbilityGrantSlot slot)
+        {
+            if (granted == null)
+                return false;
+
+            for (int i = 0; i < granted.Length; i++)
+            {
+                if (granted[i].slot == slot)
+                    return true;
+            }
+
+            return false;
         }
     }
 

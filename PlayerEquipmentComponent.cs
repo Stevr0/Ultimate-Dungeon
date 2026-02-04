@@ -10,6 +10,7 @@
 // ============================================================================
 
 using System;
+using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
@@ -29,6 +30,10 @@ namespace UltimateDungeon.Items
 
         public NetworkList<EquippedSlotNet> EquippedNet { get; private set; }
 
+        // Server-only: keep full ItemInstance data for equipped items.
+        private readonly Dictionary<EquipmentSlotId, ItemInstance> _equippedInstances =
+            new Dictionary<EquipmentSlotId, ItemInstance>();
+
         public event Action OnEquipmentChanged;
 
         private void Awake()
@@ -46,7 +51,10 @@ namespace UltimateDungeon.Items
             EquippedNet.OnListChanged += _ => OnEquipmentChanged?.Invoke();
 
             if (IsServer)
+            {
                 InitializeSlotsServer();
+                _equippedInstances.Clear();
+            }
         }
 
         // --------------------------------------------------------------------
@@ -63,6 +71,71 @@ namespace UltimateDungeon.Items
                     return EquippedNet[i];
 
             return default;
+        }
+
+        // --------------------------------------------------------------------
+        // Server helpers (authoritative lookups)
+        // --------------------------------------------------------------------
+
+        public bool TryGetEquippedItem(EquipSlot equipSlot, out ItemInstance instance, out ItemDef def)
+        {
+            instance = null;
+            def = null;
+
+            if (!IsServer)
+                return false;
+
+            if (itemDefCatalog == null)
+                return false;
+
+            if (!TryMapEquipSlotToUiSlot(equipSlot, out var uiSlot))
+                return false;
+
+            if (!_equippedInstances.TryGetValue(uiSlot, out instance) || instance == null)
+                return false;
+
+            return itemDefCatalog.TryGet(instance.itemDefId, out def) && def != null;
+        }
+
+        public static bool TryMapEquipSlotToUiSlot(EquipSlot equipSlot, out EquipmentSlotId uiSlot)
+        {
+            uiSlot = EquipmentSlotId.Bag;
+
+            switch (equipSlot)
+            {
+                case EquipSlot.Bag:
+                    uiSlot = EquipmentSlotId.Bag;
+                    return true;
+                case EquipSlot.Head:
+                    uiSlot = EquipmentSlotId.Head;
+                    return true;
+                case EquipSlot.Neck:
+                    uiSlot = EquipmentSlotId.Neck;
+                    return true;
+                case EquipSlot.Mainhand:
+                    uiSlot = EquipmentSlotId.Mainhand;
+                    return true;
+                case EquipSlot.Chest:
+                    uiSlot = EquipmentSlotId.Chest;
+                    return true;
+                case EquipSlot.Offhand:
+                    uiSlot = EquipmentSlotId.Offhand;
+                    return true;
+                case EquipSlot.BeltA:
+                    uiSlot = EquipmentSlotId.BeltA;
+                    return true;
+                case EquipSlot.BeltB:
+                    uiSlot = EquipmentSlotId.BeltB;
+                    return true;
+                case EquipSlot.Foot:
+                    uiSlot = EquipmentSlotId.Foot;
+                    return true;
+                case EquipSlot.Mount:
+                    uiSlot = EquipmentSlotId.Mount;
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         // --------------------------------------------------------------------
@@ -111,14 +184,19 @@ namespace UltimateDungeon.Items
             var existing = GetEquipped(uiSlot);
             if (!existing.IsEmpty)
             {
-                var existingInstance = new ItemInstance(existing.itemDefId.ToString())
+                if (!_equippedInstances.TryGetValue(uiSlot, out var existingInstance) || existingInstance == null)
                 {
-                    stackCount = existing.stackCount
-                };
+                    existingInstance = new ItemInstance(existing.itemDefId.ToString())
+                    {
+                        stackCount = existing.stackCount
+                    };
+                }
 
                 var addResult = playerInventory.ServerTryAdd(existingInstance, out _);
                 if (addResult != InventoryOpResult.Success)
                     return; // inventory full; abort
+
+                _equippedInstances.Remove(uiSlot);
             }
 
             // Remove from inventory.
@@ -128,6 +206,7 @@ namespace UltimateDungeon.Items
 
             // Equip.
             SetEquipped(uiSlot, removed.itemDefId, removed.stackCount);
+            _equippedInstances[uiSlot] = removed;
         }
 
         [ServerRpc]
@@ -149,10 +228,13 @@ namespace UltimateDungeon.Items
             if (existing.IsEmpty)
                 return;
 
-            var instance = new ItemInstance(existing.itemDefId.ToString())
+            if (!_equippedInstances.TryGetValue(uiSlot, out var instance) || instance == null)
             {
-                stackCount = existing.stackCount
-            };
+                instance = new ItemInstance(existing.itemDefId.ToString())
+                {
+                    stackCount = existing.stackCount
+                };
+            }
 
             // Place into the exact slot.
             var place = playerInventory.ServerTryPlaceIntoEmptySlot(targetInventorySlot, instance);
@@ -161,6 +243,7 @@ namespace UltimateDungeon.Items
 
             // Clear equipped slot.
             SetEquipped(uiSlot, string.Empty, 0);
+            _equippedInstances.Remove(uiSlot);
         }
 
         private void InitializeSlotsServer()
