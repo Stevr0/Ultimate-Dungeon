@@ -270,7 +270,7 @@ namespace UltimateDungeon.Items
             EquipmentSlotId uiSlot,
             AbilityGrantSlot grantSlot,
             int spellId,
-            RpcParams rpcParams = default)
+            ServerRpcParams rpcParams = default)
         {
             if (!IsServer) return;
 
@@ -536,6 +536,7 @@ namespace UltimateDungeon.Items
     }
 
     [Serializable]
+
     public struct EquippedSlotNet : INetworkSerializable, IEquatable<EquippedSlotNet>
     {
         public EquipmentSlotId slot;
