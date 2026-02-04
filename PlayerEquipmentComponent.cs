@@ -17,6 +17,8 @@ using UnityEngine;
 
 namespace UltimateDungeon.Items
 {
+    using UltimateDungeon.Actors;
+    using UltimateDungeon.Spells;
     using UltimateDungeon.UI;
 
     [DisallowMultipleComponent]
@@ -164,6 +166,12 @@ namespace UltimateDungeon.Items
             UnequipToInventoryServerRpc(uiSlot, targetInventorySlot);
         }
 
+        public void RequestSetAbilitySelection(EquipmentSlotId uiSlot, AbilityGrantSlot grantSlot, SpellId spellId)
+        {
+            if (!IsOwner) return;
+            RequestSetAbilitySelectionServerRpc(uiSlot, grantSlot, (int)spellId);
+        }
+
         // --------------------------------------------------------------------
         // Server logic
         // --------------------------------------------------------------------
@@ -215,7 +223,8 @@ namespace UltimateDungeon.Items
                 return;
 
             // Equip.
-            SetEquipped(uiSlot, removed.itemDefId, removed.stackCount);
+            BuildEquippedSnapshot(removed, def, out var activeSlot, out var primarySpell, out var secondarySpell, out var utilitySpell);
+            SetEquipped(uiSlot, removed.itemDefId, removed.stackCount, (byte)activeSlot, (int)primarySpell, (int)secondarySpell, (int)utilitySpell);
             _equippedInstances[uiSlot] = removed;
         }
 
@@ -252,8 +261,46 @@ namespace UltimateDungeon.Items
                 return;
 
             // Clear equipped slot.
-            SetEquipped(uiSlot, string.Empty, 0);
+            SetEquipped(uiSlot, string.Empty, 0, (byte)AbilityGrantSlot.Primary, (int)SpellId.None, (int)SpellId.None, (int)SpellId.None);
             _equippedInstances.Remove(uiSlot);
+        }
+
+        [ServerRpc]
+        private void RequestSetAbilitySelectionServerRpc(
+            EquipmentSlotId uiSlot,
+            AbilityGrantSlot grantSlot,
+            int spellId,
+            RpcParams rpcParams = default)
+        {
+            if (!IsServer) return;
+
+            if (rpcParams.Receive.SenderClientId != OwnerClientId)
+                return;
+
+            if (itemDefCatalog == null)
+                return;
+
+            if (!_equippedInstances.TryGetValue(uiSlot, out var instance) || instance == null)
+                return;
+
+            if (!itemDefCatalog.TryGet(instance.itemDefId, out var def) || def == null)
+                return;
+
+            if (TryGetComponent(out ActorComponent actor) && actor.State == CombatState.InCombat)
+                return;
+
+            var chosenSpell = (SpellId)spellId;
+            if (chosenSpell == SpellId.None)
+                return;
+
+            if (!instance.TrySetSelectedSpellId(def, grantSlot, chosenSpell))
+                return;
+
+            // "Last changed dropdown sets active" for hotbar.
+            instance.activeGrantSlot = grantSlot;
+
+            BuildEquippedSnapshot(instance, def, out var activeSlot, out var primarySpell, out var secondarySpell, out var utilitySpell);
+            SetEquipped(uiSlot, instance.itemDefId, instance.stackCount, (byte)activeSlot, (int)primarySpell, (int)secondarySpell, (int)utilitySpell);
         }
 
         private void InitializeSlotsServer()
@@ -266,7 +313,11 @@ namespace UltimateDungeon.Items
                 {
                     slot = slot,
                     itemDefId = default,
-                    stackCount = 0
+                    stackCount = 0,
+                    activeGrantSlotForHotbar = (byte)AbilityGrantSlot.Primary,
+                    selectedSpellPrimary = (int)SpellId.None,
+                    selectedSpellSecondary = (int)SpellId.None,
+                    selectedSpellUtility = (int)SpellId.None
                 });
             }
         }
@@ -280,7 +331,14 @@ namespace UltimateDungeon.Items
             return default;
         }
 
-        private void SetEquipped(EquipmentSlotId slot, string itemDefId, int stackCount)
+        private void SetEquipped(
+            EquipmentSlotId slot,
+            string itemDefId,
+            int stackCount,
+            byte activeGrantSlotForHotbar,
+            int selectedSpellPrimary,
+            int selectedSpellSecondary,
+            int selectedSpellUtility)
         {
             var id = new FixedString64Bytes(itemDefId);
 
@@ -293,7 +351,11 @@ namespace UltimateDungeon.Items
                 {
                     slot = slot,
                     itemDefId = id,
-                    stackCount = Mathf.Max(0, stackCount)
+                    stackCount = Mathf.Max(0, stackCount),
+                    activeGrantSlotForHotbar = activeGrantSlotForHotbar,
+                    selectedSpellPrimary = selectedSpellPrimary,
+                    selectedSpellSecondary = selectedSpellSecondary,
+                    selectedSpellUtility = selectedSpellUtility
                 };
                 return;
             }
@@ -302,8 +364,151 @@ namespace UltimateDungeon.Items
             {
                 slot = slot,
                 itemDefId = id,
-                stackCount = Mathf.Max(0, stackCount)
+                stackCount = Mathf.Max(0, stackCount),
+                activeGrantSlotForHotbar = activeGrantSlotForHotbar,
+                selectedSpellPrimary = selectedSpellPrimary,
+                selectedSpellSecondary = selectedSpellSecondary,
+                selectedSpellUtility = selectedSpellUtility
             });
+        }
+
+        private static void BuildEquippedSnapshot(
+            ItemInstance instance,
+            ItemDef def,
+            out AbilityGrantSlot activeSlot,
+            out SpellId selectedPrimary,
+            out SpellId selectedSecondary,
+            out SpellId selectedUtility)
+        {
+            activeSlot = AbilityGrantSlot.Primary;
+            selectedPrimary = SpellId.None;
+            selectedSecondary = SpellId.None;
+            selectedUtility = SpellId.None;
+
+            if (instance == null || def == null)
+                return;
+
+            activeSlot = instance.activeGrantSlot;
+
+            var grantedSlots = def.grantedAbilities.grantedAbilitySlots;
+            if (grantedSlots != null && grantedSlots.Length > 0)
+            {
+                if (!IsGrantSlotAllowed(grantedSlots, activeSlot))
+                    activeSlot = GetDefaultActiveGrantSlot(def);
+            }
+
+            instance.activeGrantSlot = activeSlot;
+
+            selectedPrimary = ResolveSelection(instance, def, AbilityGrantSlot.Primary);
+            selectedSecondary = ResolveSelection(instance, def, AbilityGrantSlot.Secondary);
+            selectedUtility = ResolveSelection(instance, def, AbilityGrantSlot.Utility);
+        }
+
+        private static SpellId ResolveSelection(ItemInstance instance, ItemDef def, AbilityGrantSlot slot)
+        {
+            if (!TryGetGrantedSlot(def, slot, out var grantedSlot))
+                return SpellId.None;
+
+            var selected = instance.GetSelectedSpellId(def, slot);
+            if (!IsSpellAllowed(selected, grantedSlot.allowedSpellIds))
+                selected = SpellId.None;
+
+            if (selected == SpellId.None)
+            {
+                var fallback = GetFirstAllowedSpell(grantedSlot.allowedSpellIds);
+                if (fallback != SpellId.None && instance.TrySetSelectedSpellId(def, slot, fallback))
+                    selected = fallback;
+            }
+
+            return selected;
+        }
+
+        private static AbilityGrantSlot GetDefaultActiveGrantSlot(ItemDef def)
+        {
+            if (HasGrantSlot(def, AbilityGrantSlot.Primary))
+                return AbilityGrantSlot.Primary;
+            if (HasGrantSlot(def, AbilityGrantSlot.Secondary))
+                return AbilityGrantSlot.Secondary;
+            if (HasGrantSlot(def, AbilityGrantSlot.Utility))
+                return AbilityGrantSlot.Utility;
+
+            return AbilityGrantSlot.Primary;
+        }
+
+        private static bool HasGrantSlot(ItemDef def, AbilityGrantSlot slot)
+        {
+            if (def == null)
+                return false;
+
+            var slots = def.grantedAbilities.grantedAbilitySlots;
+            if (slots == null)
+                return false;
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (slots[i].slot == slot)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsGrantSlotAllowed(GrantedAbilitySlot[] granted, AbilityGrantSlot slot)
+        {
+            if (granted == null)
+                return false;
+
+            for (int i = 0; i < granted.Length; i++)
+            {
+                if (granted[i].slot == slot)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetGrantedSlot(ItemDef def, AbilityGrantSlot slot, out GrantedAbilitySlot grantedSlot)
+        {
+            var slots = def.grantedAbilities.grantedAbilitySlots;
+            if (slots != null)
+            {
+                for (int i = 0; i < slots.Length; i++)
+                {
+                    if (slots[i].slot == slot)
+                    {
+                        grantedSlot = slots[i];
+                        return true;
+                    }
+                }
+            }
+
+            grantedSlot = default;
+            return false;
+        }
+
+        private static bool IsSpellAllowed(SpellId selected, SpellId[] allowed)
+        {
+            if (selected == SpellId.None)
+                return false;
+
+            if (allowed == null)
+                return false;
+
+            for (int i = 0; i < allowed.Length; i++)
+            {
+                if (allowed[i] == selected)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static SpellId GetFirstAllowedSpell(SpellId[] allowed)
+        {
+            if (allowed == null || allowed.Length == 0)
+                return SpellId.None;
+
+            return allowed[0];
         }
 
         private static bool IsLegalEquip(ItemDef def, EquipmentSlotId uiSlot)
@@ -336,6 +541,10 @@ namespace UltimateDungeon.Items
         public EquipmentSlotId slot;
         public FixedString64Bytes itemDefId;
         public int stackCount;
+        public byte activeGrantSlotForHotbar;
+        public int selectedSpellPrimary;
+        public int selectedSpellSecondary;
+        public int selectedSpellUtility;
 
         public bool IsEmpty => stackCount <= 0 || itemDefId.Length == 0;
 
@@ -344,11 +553,21 @@ namespace UltimateDungeon.Items
             serializer.SerializeValue(ref slot);
             serializer.SerializeValue(ref itemDefId);
             serializer.SerializeValue(ref stackCount);
+            serializer.SerializeValue(ref activeGrantSlotForHotbar);
+            serializer.SerializeValue(ref selectedSpellPrimary);
+            serializer.SerializeValue(ref selectedSpellSecondary);
+            serializer.SerializeValue(ref selectedSpellUtility);
         }
 
         public bool Equals(EquippedSlotNet other)
         {
-            return slot == other.slot && itemDefId.Equals(other.itemDefId) && stackCount == other.stackCount;
+            return slot == other.slot
+                && itemDefId.Equals(other.itemDefId)
+                && stackCount == other.stackCount
+                && activeGrantSlotForHotbar == other.activeGrantSlotForHotbar
+                && selectedSpellPrimary == other.selectedSpellPrimary
+                && selectedSpellSecondary == other.selectedSpellSecondary
+                && selectedSpellUtility == other.selectedSpellUtility;
         }
     }
 }
