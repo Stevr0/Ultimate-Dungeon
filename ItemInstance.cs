@@ -325,6 +325,25 @@ namespace UltimateDungeon.Items
         }
 
         /// <summary>
+        /// Attempts to set the active hotbar slot for this item.
+        /// </summary>
+        public bool TrySetActiveGrantSlotForHotbar(ItemDef def, AbilityGrantSlot slot)
+        {
+            if (def == null)
+                return false;
+
+            var granted = def.grantedAbilities.grantedAbilitySlots;
+            if (granted == null || granted.Length == 0)
+                return false;
+
+            if (!IsGrantSlotAllowed(granted, slot))
+                return false;
+
+            activeGrantSlot = slot;
+            return true;
+        }
+
+        /// <summary>
         /// Attempts to set the selected SpellId for a slot.
         ///
         /// Returns false if:
