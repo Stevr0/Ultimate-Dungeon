@@ -14,7 +14,7 @@
 //
 // IMPORTANT:
 // - This panel is UI-only.
-// - It does NOT mutate game state.
+// - It does NOT directly mutate game state; equipped-item changes are sent to the server.
 // - It does NOT decide what abilities are allowed; it only passes ItemDef/ItemInstance
 //   to the child "granted abilities" panel if you wired one.
 //
@@ -33,10 +33,12 @@
 // ============================================================================
 
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using UltimateDungeon.Actors;
 using UltimateDungeon.Items;
 using UltimateDungeon.Spells;
 using UltimateDungeon.UI.Hotbar;
@@ -93,6 +95,9 @@ namespace UltimateDungeon.UI
         [Header("Hotbar Icon Updates (Optional)")]
         [SerializeField] private HotbarSpellIconBinder hotbarIconBinder;
 
+        private PlayerEquipmentComponent _equipment;
+        private ActorComponent _actor;
+
         private void Awake()
         {
             if (targetWindow == null)
@@ -114,6 +119,10 @@ namespace UltimateDungeon.UI
 
             if (hotbarIconBinder == null)
                 hotbarIconBinder = FindFirstObjectByType<HotbarSpellIconBinder>(FindObjectsInactive.Include);
+
+            PlayerNetIdentity.LocalPlayerSpawned += HandleLocalPlayerSpawned;
+            if (PlayerNetIdentity.Local != null)
+                HandleLocalPlayerSpawned(PlayerNetIdentity.Local);
         }
 
         private void OnDisable()
@@ -123,6 +132,9 @@ namespace UltimateDungeon.UI
 
             if (grantedAbilitiesPanelTyped != null)
                 grantedAbilitiesPanelTyped.OnSelectionChanged -= HandleAbilitySelectionChanged;
+
+            PlayerNetIdentity.LocalPlayerSpawned -= HandleLocalPlayerSpawned;
+            UnbindEquipment();
         }
 
         public void BindCatalog(ItemDefCatalog catalog)
@@ -173,7 +185,8 @@ namespace UltimateDungeon.UI
             // Also hide the granted-abilities panel (if present)
             TryInvokeHide(ItemGrantedAbilitiesPanelUI);
 
-
+            if (grantedAbilitiesPanelTyped != null)
+                grantedAbilitiesPanelTyped.Hide();
         }
 
         private void HandleCancelClicked()
@@ -233,9 +246,166 @@ namespace UltimateDungeon.UI
             // NEW: Hand off to the optional "granted abilities" panel.
             // This is intentionally *UI-only*. It just passes the same def + instance
             // the details panel is already using.
-            TryInvokeGrantedAbilitiesPanel(ItemGrantedAbilitiesPanelUI, def, instance);
+            RenderGrantedAbilitiesPanel(def, instance, equipmentSlot);
 
             UpdateActiveGrantSlotHighlight();
+        }
+
+        private void HandleLocalPlayerSpawned(PlayerNetIdentity identity)
+        {
+            if (identity == null)
+                return;
+
+            var equipment = identity.GetComponent<PlayerEquipmentComponent>();
+            var actor = identity.GetComponent<ActorComponent>();
+
+            if (_equipment == equipment && _actor == actor)
+                return;
+
+            UnbindEquipment();
+
+            _equipment = equipment;
+            _actor = actor;
+
+            if (_equipment != null)
+                _equipment.OnEquipmentChanged += HandleEquipmentChanged;
+        }
+
+        private void UnbindEquipment()
+        {
+            if (_equipment != null)
+                _equipment.OnEquipmentChanged -= HandleEquipmentChanged;
+
+            _equipment = null;
+            _actor = null;
+        }
+
+        private void HandleEquipmentChanged()
+        {
+            if (!_currentEquipmentSlot.HasValue || _currentDef == null)
+                return;
+
+            RefreshGrantedAbilitiesFromSnapshot();
+            UpdateActiveGrantSlotHighlight();
+        }
+
+        private void RenderGrantedAbilitiesPanel(ItemDef def, ItemInstance instance, EquipmentSlotId? equipmentSlot)
+        {
+            bool canEdit = CanEditAbilitySelections();
+
+            if (grantedAbilitiesPanelTyped != null)
+            {
+                var selections = BuildSelectionsForPanel(def, instance, equipmentSlot);
+                grantedAbilitiesPanelTyped.Show(def, selections, canEdit);
+                return;
+            }
+
+            TryInvokeGrantedAbilitiesPanel(ItemGrantedAbilitiesPanelUI, def, instance);
+        }
+
+        private bool CanEditAbilitySelections()
+        {
+            return _actor == null || _actor.State != CombatState.InCombat;
+        }
+
+        private List<ItemGrantedAbilitiesPanelUI.SlotSelection> BuildSelectionsForPanel(
+            ItemDef def,
+            ItemInstance instance,
+            EquipmentSlotId? equipmentSlot)
+        {
+            if (equipmentSlot.HasValue && instance == null)
+                return BuildSelectionsFromSnapshot(def, equipmentSlot.Value);
+
+            if (instance != null)
+                return BuildSelectionsFromInstance(def, instance);
+
+            return BuildSelectionsFromDef(def);
+        }
+
+        private List<ItemGrantedAbilitiesPanelUI.SlotSelection> BuildSelectionsFromSnapshot(ItemDef def, EquipmentSlotId slotId)
+        {
+            var list = new List<ItemGrantedAbilitiesPanelUI.SlotSelection>(3);
+
+            if (_equipment == null)
+                return list;
+
+            var equipped = _equipment.GetEquippedForUI(slotId);
+            var slots = def.grantedAbilities.grantedAbilitySlots;
+            if (slots == null)
+                return list;
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                var slot = slots[i].slot;
+                list.Add(new ItemGrantedAbilitiesPanelUI.SlotSelection
+                {
+                    slot = slot,
+                    selectedSpellId = GetSnapshotSpellId(equipped, slot)
+                });
+            }
+
+            return list;
+        }
+
+        private static List<ItemGrantedAbilitiesPanelUI.SlotSelection> BuildSelectionsFromInstance(ItemDef def, ItemInstance instance)
+        {
+            var list = new List<ItemGrantedAbilitiesPanelUI.SlotSelection>(3);
+
+            var slots = def.grantedAbilities.grantedAbilitySlots;
+            if (slots == null)
+                return list;
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                var slot = slots[i].slot;
+                var selected = instance != null ? instance.GetSelectedSpellId(def, slot) : slots[i].defaultSpellId;
+                list.Add(new ItemGrantedAbilitiesPanelUI.SlotSelection
+                {
+                    slot = slot,
+                    selectedSpellId = selected
+                });
+            }
+
+            return list;
+        }
+
+        private static List<ItemGrantedAbilitiesPanelUI.SlotSelection> BuildSelectionsFromDef(ItemDef def)
+        {
+            var list = new List<ItemGrantedAbilitiesPanelUI.SlotSelection>(3);
+            var slots = def.grantedAbilities.grantedAbilitySlots;
+            if (slots == null)
+                return list;
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                list.Add(new ItemGrantedAbilitiesPanelUI.SlotSelection
+                {
+                    slot = slots[i].slot,
+                    selectedSpellId = slots[i].defaultSpellId
+                });
+            }
+
+            return list;
+        }
+
+        private void RefreshGrantedAbilitiesFromSnapshot()
+        {
+            if (!_currentEquipmentSlot.HasValue || grantedAbilitiesPanelTyped == null || _currentDef == null)
+                return;
+
+            var selections = BuildSelectionsFromSnapshot(_currentDef, _currentEquipmentSlot.Value);
+            grantedAbilitiesPanelTyped.Show(_currentDef, selections, CanEditAbilitySelections());
+        }
+
+        private static SpellId GetSnapshotSpellId(EquippedSlotNet equipped, AbilityGrantSlot slot)
+        {
+            return slot switch
+            {
+                AbilityGrantSlot.Primary => (SpellId)equipped.selectedSpellPrimary,
+                AbilityGrantSlot.Secondary => (SpellId)equipped.selectedSpellSecondary,
+                AbilityGrantSlot.Utility => (SpellId)equipped.selectedSpellUtility,
+                _ => SpellId.None
+            };
         }
 
         private void HandleAbilitySelectionChanged(AbilityGrantSlot slot, SpellId chosen)
@@ -243,7 +413,16 @@ namespace UltimateDungeon.UI
             // We can only persist if we have a live instance to write to.
             // Inventory items should always have an instance.
             // Equipment can be def-only in some cases; if so, ignore.
-            if (_currentDef == null || _currentInstance == null)
+            if (_currentDef == null)
+                return;
+
+            if (_currentEquipmentSlot.HasValue && _equipment != null)
+            {
+                _equipment.RequestSetAbilitySelection(_currentEquipmentSlot.Value, slot, chosen);
+                return;
+            }
+
+            if (_currentInstance == null)
                 return;
 
             // Use the instances validation rules (allowedSpellIds, slot exists, etc.)
@@ -269,6 +448,11 @@ namespace UltimateDungeon.UI
                 _currentInstance.TryResolveActiveGrantSlot(_currentDef, allowUpdate: false, out var resolved))
             {
                 activeSlot = resolved;
+            }
+            else if (_currentEquipmentSlot.HasValue && _equipment != null)
+            {
+                var equipped = _equipment.GetEquippedForUI(_currentEquipmentSlot.Value);
+                activeSlot = (AbilityGrantSlot)equipped.activeGrantSlotForHotbar;
             }
             else
             {

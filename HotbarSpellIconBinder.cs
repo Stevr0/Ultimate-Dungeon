@@ -150,20 +150,8 @@ namespace UltimateDungeon.UI.Hotbar
                 return;
             }
 
-            if (!_equipment.TryGetEquippedInstanceForUI(uiSlot, out var instance) || instance == null)
-            {
-                // UI-only: without an instance we cannot resolve the active grant slot selection.
-                hotbar.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            if (!instance.TryResolveActiveGrantSlot(itemDef, allowUpdate: false, out var activeSlot))
-            {
-                hotbar.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            var spellId = instance.GetSelectedSpellId(itemDef, activeSlot);
+            var activeSlot = (AbilityGrantSlot)equipped.activeGrantSlotForHotbar;
+            var spellId = ResolveSelectedSpell(equipped, activeSlot);
             if (spellId == SpellId.None)
             {
                 hotbar.ClearSlot(hotbarIndex);
@@ -180,6 +168,17 @@ namespace UltimateDungeon.UI.Hotbar
             // Spell icons are authored on SpellDef. Use a placeholder if missing.
             var icon = spellDef.spellIcon != null ? spellDef.spellIcon : fallbackIcon;
             hotbar.SetSlotIcon(hotbarIndex, icon);
+        }
+
+        private static SpellId ResolveSelectedSpell(EquippedSlotNet equipped, AbilityGrantSlot activeSlot)
+        {
+            return activeSlot switch
+            {
+                AbilityGrantSlot.Primary => (SpellId)equipped.selectedSpellPrimary,
+                AbilityGrantSlot.Secondary => (SpellId)equipped.selectedSpellSecondary,
+                AbilityGrantSlot.Utility => (SpellId)equipped.selectedSpellUtility,
+                _ => SpellId.None
+            };
         }
     }
 }
