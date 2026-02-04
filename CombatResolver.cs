@@ -105,6 +105,39 @@ namespace UltimateDungeon.Combat
             TryTriggerHitFeedback(target, packet.finalDamageAmount);
         }
 
+        /// <summary>
+        /// Resolve a spell damage payload.
+        /// This is the canonical server path for spell-based damage.
+        /// </summary>
+        public static void ResolveSpellDamage(ICombatActor caster, ICombatActor target, int finalDamage, DamageType type)
+        {
+            if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer)
+            {
+                Debug.LogWarning("[CombatResolver] ResolveSpellDamage called on non-server. Ignored.");
+                return;
+            }
+
+            if (caster == null || target == null)
+                return;
+
+            if (!caster.IsAlive || !target.IsAlive)
+                return;
+
+            DamagePacket packet = new DamagePacket
+            {
+                sourceActorNetId = caster.NetId,
+                targetActorNetId = target.NetId,
+                finalDamageAmount = Mathf.Max(0, finalDamage),
+                damageType = type,
+                seed = 0,
+                tags = DamageTags.Spell
+            };
+
+            ApplyDamagePacket(packet, caster, target);
+
+            TryTriggerHitFeedback(target, packet.finalDamageAmount);
+        }
+
         // -------------------------
         // Disengage helpers
         // -------------------------
