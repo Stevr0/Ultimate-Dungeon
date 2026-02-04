@@ -1,6 +1,6 @@
 # SYSTEM_INTERACTION_MODEL.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 0.2  
+Version: 0.3  
 Last Updated: 2026-02-04  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
@@ -12,7 +12,7 @@ Authority: Server-authoritative
 
 This document defines **how the major gameplay systems interact** in *Ultimate Dungeon*.
 
-Its role is to prevent systemic drift (“system soup”) by explicitly locking:
+Its role is to prevent systemic drift ("system soup") by explicitly locking:
 - **System ownership boundaries**
 - **Allowed interaction paths**
 - **Where RNG is permitted**
@@ -45,7 +45,7 @@ This model must remain aligned with:
 
 ## DESIGN PILLAR (LOCKED)
 
-### The game is **Item‑First**
+### The game is **Item-First**
 
 **Items are the primary source of player power, identity, and agency.**
 
@@ -54,7 +54,7 @@ This model must remain aligned with:
 - Items introduce **RNG** via affixes
 - Skills modify efficiency and permissions, but **never replace items**
 
-This pillar must remain intact to avoid class‑ or build‑tree drift.
+This pillar must remain intact to avoid class- or build-tree drift.
 
 ---
 
@@ -70,9 +70,9 @@ Each system may only perform the responsibilities listed under **Owns**.
 - Item identity model: `ItemDef` vs `ItemInstance`
 - Equipment slot legality and family mapping
 - Authored base data for weapons, armor, containers, consumables
-- Item durability state (instance‑only)
+- Item durability state (instance-only)
 - Affix pool eligibility
-- Item‑granted ability *choices* (allowed `SpellId`s per slot)
+- Item-granted ability *choices* (allowed `SpellId`s per slot)
 
 **Does NOT own:**
 - Combat legality
@@ -82,13 +82,9 @@ Each system may only perform the responsibilities listed under **Owns**.
 
 **Locks:**
 - `ItemDef` is immutable authored data
-- `ItemInstance` holds runtime state (durability, affixes, selected spell)
+- `ItemInstance` holds runtime state (durability, affixes, selected spells)
 - Server exclusively creates and mutates instances
 - Magical items are defined by affix presence (0..N)
-
-References:
-- `ITEMS.md`
-- `ITEM_DEF_SCHEMA.md`
 
 ---
 
@@ -108,18 +104,16 @@ References:
 - **Affixes are numeric modifiers only**
 - **Affixes never grant abilities**
 
-Reference:
-- `ITEM_AFFIX_CATALOG.md`
-
 ---
 
-### 3) Item‑Granted Abilities
+### 3) Item-Granted Abilities
 
-**Definition (LOCKED):**
+**Definition (LOCKED):**  
 An **ability** is an action the player may activate that resolves through the spell/ability payload pipeline.
 
 **Owns:**
 - Ability availability via **equipped items only**
+- Ability grant structure (`AbilityGrantSlots`: Primary / Secondary / Utility)
 - Ability selection stored on the **ItemInstance**
 - Hotbar as a projection of equipped item grants
 
@@ -130,10 +124,7 @@ An **ability** is an action the player may activate that resolves through the sp
 **Locks:**
 - Granted abilities are part of base item identity
 - Ability access is never randomized
-- **During combat, ability selection is frozen**
-
-Reference:
-- `ITEM_DEF_SCHEMA.md`
+- **During combat, ability selection and hotbar configuration are frozen**
 
 ---
 
@@ -144,7 +135,7 @@ Reference:
 - Permission and efficiency inputs:
   - Weapon proficiency requirements
   - Crafting/enhancement skill checks
-  - Use‑based progression rules
+  - Use-based progression rules
 
 **Does NOT own:**
 - Ability unlocks
@@ -155,15 +146,11 @@ Reference:
 - No classes, levels, or XP
 - Server authoritative values
 
-References:
-- `PLAYER_DEFINITION.md`
-- `SKILL_ID_CATALOG.md`
-
 ---
 
 ### 5) Spells / Ability Payloads
 
-**Definition (LOCKED):**
+**Definition (LOCKED):**  
 A **SpellId** is a stable identifier for an effect payload. Spells are **data**, not progression.
 
 **Owns:**
@@ -181,18 +168,14 @@ A **SpellId** is a stable identifier for an effect payload. Spells are **data**,
 - Status semantics
 
 **Locks:**
-- All item‑granted abilities resolve via `SpellId`
+- All item-granted abilities resolve via `SpellId`
 - Reagents are used by **Alchemy only**, never spellcasting
-
-References:
-- `SPELL_ID_CATALOG.md`
-- `SPELL_DEF_SCHEMA.md`
 
 ---
 
 ### 6) Status Effects
 
-**Definition (LOCKED):**
+**Definition (LOCKED):**  
 A **Status Effect** is an authoritative state applied to an Actor that gates actions, modifies timing, or emits ticks.
 
 **Owns:**
@@ -212,10 +195,7 @@ A **Status Effect** is an authoritative state applied to an Actor that gates act
 
 **Locks:**
 - Server authoritative application and ticking
-- Systems query structured flags, not per‑status hardcode
-
-Reference:
-- `STATUS_EFFECT_CATALOG.md`
+- Systems query structured flags, not per-status hardcode
 
 ---
 
@@ -239,11 +219,6 @@ Reference:
 - Clients submit intents; server validates
 - Safe scenes categorically refuse hostile intents
 
-References:
-- `ACTOR_MODEL.md`
-- `TARGETING_MODEL.md`
-- `SCENE_RULE_PROVIDER.md`
-
 ---
 
 ### 8) Combat Core (Execution)
@@ -251,7 +226,7 @@ References:
 **Owns:**
 - Scheduling and resolving attacks and bandages
 - Deterministic hit/miss and damage resolution
-- Weapon proc rolls (weapon‑only)
+- Weapon proc rolls (weapon-only)
 - Durability loss and death triggers
 
 **Does NOT own:**
@@ -260,10 +235,7 @@ References:
 
 **Locks:**
 - Legality must be validated before scheduling
-- Scene flags must be re‑checked at resolution
-
-Reference:
-- `COMBAT_CORE.md`
+- Scene flags must be re-checked at resolution
 
 ---
 
@@ -282,8 +254,67 @@ Reference:
 - RNG
 - Combat flow
 
-Reference:
-- `PLAYER_COMBAT_STATS.md`
+---
+
+## HOTBAR → EQUIPMENT → ABILITY RESOLUTION (LOCKED)
+
+### Core Rule
+
+The hotbar is a **direct projection of equipped items**.
+
+- The hotbar contains **exactly one slot per EquipSlot**
+- Hotbar slot indices map **1:1** to `EquipSlot`
+- Hotbar slots **never reference inventory slots or container indices**
+
+Inventory is storage only. Power originates exclusively from **equipped items**.
+
+---
+
+### Per-Item Hotbar Configuration
+
+Each equipped `ItemInstance`:
+- Defines one or more `AbilityGrantSlots` (`Primary`, `Secondary`, `Utility`)
+- Stores a **selected SpellId** per grant slot (from allowed options)
+- Stores **which AbilityGrantSlot is active on the hotbar** for that item
+
+The player may:
+- Select which grant slot is active for the hotbar
+- Select which SpellId is chosen within each grant slot
+
+**Restrictions (LOCKED):**
+- Ability selection and hotbar configuration **cannot change during combat**
+- If an item supports only one grant slot, it is forced active
+
+---
+
+### Hotbar Activation Flow (Authoritative)
+
+When a hotbar slot is activated:
+
+1. Resolve `EquipSlot` from hotbar index
+2. Resolve equipped `ItemInstance`
+3. Resolve item’s active `AbilityGrantSlot`
+4. Resolve selected `SpellId` for that grant slot
+5. Validate:
+   - Scene rules
+   - Actor legality
+   - Combat state
+   - Targeting legality
+6. Submit intent (`CastBeneficial` or `CastHarmful`)
+7. Execute spell/ability payload on server
+
+If any step fails, the activation is **authoritatively denied**.
+
+---
+
+### Unequip & Invalid State Rules (LOCKED)
+
+- Unequipping an item immediately invalidates its hotbar slot
+- Hotbar slots with no equipped item are inert
+- If an item changes (durability break, replacement):
+  - Hotbar resolution always uses **current ItemInstance state**
+
+No hotbar binding is cached across equip changes.
 
 ---
 
@@ -298,20 +329,19 @@ Reference:
 
 ---
 
-### Flow B — Using an Item‑Granted Ability (Hotbar)
+### Flow B — Using an Item-Granted Ability (Hotbar)
 1. Client activates hotbar slot
-2. Client submits intent: `CastBeneficial` or `CastHarmful`
+2. Client submits intent (`CastBeneficial` or `CastHarmful`)
 3. Server validates:
    - Scene rules
    - Actor legality
    - Targeting
-   - Access (item grants selected `SpellId`)
+   - Item access (equipped + selected SpellId)
 4. Server executes payload
 5. Payload may:
    - Apply statuses
    - Emit Damage/Heal packets
-   - Create summons (scrolls only)
-6. Combat systems resolve consequences
+   - Trigger visuals / UI events
 
 ---
 
@@ -320,7 +350,7 @@ Reference:
 2. Server validates legality
 3. Combat Core schedules swing
 4. On resolution:
-   - Re‑gate scene
+   - Re-gate scene
    - Consume stamina/ammo
    - Roll hit/miss
    - Apply damage, procs, durability loss
@@ -339,38 +369,24 @@ Reference:
 
 ## HARD RULES (LOCKED)
 
-1. **No hidden auto‑hostility**
-2. **No client‑authoritative outcomes**
-3. **Affixes never grant abilities**
-4. **Skills never unlock spells**
-5. **No combat in safe scenes**
-6. **No ability selection or item movement during combat**
+1. No hidden auto-hostility
+2. No client-authoritative outcomes
+3. Affixes never grant abilities
+4. Skills never unlock spells
+5. No combat in safe scenes
+6. No ability selection or hotbar reassignment during combat
 
 ---
 
 ## TERMINOLOGY (LOCKED)
 
 - **ItemDef** — immutable authored definition
-- **ItemInstance** — runtime state (durability, affixes, selected spell)
-- **Ability** — item‑granted action executed via SpellId
+- **ItemInstance** — runtime state (durability, affixes, selected spells)
+- **Ability** — item-granted action executed via SpellId
 - **SpellId** — payload identifier
 - **Affix** — numeric modifier
 - **Status Effect** — authoritative gated state
 - **Intent** — client request validated by server
-
----
-
-## CONSUMABLE & SUMMON RULES (LOCKED)
-
-- Potions, Food, Bandages:
-  - Charge‑based or stack‑based consumables
-  - Resolve via `CastBeneficial`
-
-- Scrolls:
-  - Single‑use items
-  - **Only source of summons**
-
-Weapon procs may **never** summon or create fields.
 
 ---
 
@@ -382,4 +398,3 @@ Any change must:
 - Increment Version
 - Update Last Updated
 - Explicitly call out impacted systems
-
