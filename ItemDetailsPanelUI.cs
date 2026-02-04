@@ -418,7 +418,17 @@ namespace UltimateDungeon.UI
 
             if (_currentEquipmentSlot.HasValue && _equipment != null)
             {
+                Debug.Log(
+                    $"[ItemDetailsPanelUI] Requesting ability selection change for equipment slot {_currentEquipmentSlot.Value} (grant slot: {slot}, spell: {chosen}).");
+
+                if (grantedAbilitiesPanelTyped != null)
+                    grantedAbilitiesPanelTyped.SetActiveGrantSlot(slot);
+
                 _equipment.RequestSetAbilitySelection(_currentEquipmentSlot.Value, slot, chosen);
+
+                if (hotbarIconBinder != null)
+                    hotbarIconBinder.RefreshSlotForEquipmentSlot(_currentEquipmentSlot.Value);
+
                 return;
             }
 
