@@ -26,6 +26,14 @@ namespace UltimateDungeon.Spells
             return _map.TryGetValue(id, out def);
         }
 
+        /// <summary>
+        /// Returns a SpellDef for the given id (or null if not found).
+        /// </summary>
+        public SpellDef Get(SpellId id)
+        {
+            return TryGet(id, out var def) ? def : null;
+        }
+
         private void Rebuild()
         {
             _map = new Dictionary<SpellId, SpellDef>();

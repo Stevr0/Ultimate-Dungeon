@@ -73,6 +73,16 @@ namespace UltimateDungeon.Items
             return default;
         }
 
+        /// <summary>
+        /// UI-only helper: attempt to read the full ItemInstance for a slot when available.
+        /// This is used for client-side visual updates (e.g., hotbar icon selection).
+        /// </summary>
+        public bool TryGetEquippedInstanceForUI(EquipmentSlotId slot, out ItemInstance instance)
+        {
+            instance = null;
+            return _equippedInstances.TryGetValue(slot, out instance) && instance != null;
+        }
+
         // --------------------------------------------------------------------
         // Server helpers (authoritative lookups)
         // --------------------------------------------------------------------

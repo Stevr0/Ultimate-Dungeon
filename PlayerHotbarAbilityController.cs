@@ -199,7 +199,7 @@ namespace UltimateDungeon.Spells
             return true;
         }
 
-        private static bool TryMapHotbarIndexToEquipSlot(int hotbarIndex, out EquipSlot equipSlot)
+        public static bool TryMapHotbarIndexToEquipSlot(int hotbarIndex, out EquipSlot equipSlot)
         {
             equipSlot = EquipSlot.None;
 
