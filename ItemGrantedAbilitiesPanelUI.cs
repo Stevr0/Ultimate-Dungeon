@@ -75,16 +75,19 @@ namespace UltimateDungeon.UI
         [SerializeField] private GameObject primaryRowRoot;
         [SerializeField] private TMP_Text primaryLabel;
         [SerializeField] private TMP_Dropdown primaryDropdown;
+        [SerializeField] private GameObject primaryActiveHighlight;
 
         [Header("Row: Secondary")]
         [SerializeField] private GameObject secondaryRowRoot;
         [SerializeField] private TMP_Text secondaryLabel;
         [SerializeField] private TMP_Dropdown secondaryDropdown;
+        [SerializeField] private GameObject secondaryActiveHighlight;
 
         [Header("Row: Utility")]
         [SerializeField] private GameObject utilityRowRoot;
         [SerializeField] private TMP_Text utilityLabel;
         [SerializeField] private TMP_Dropdown utilityDropdown;
+        [SerializeField] private GameObject utilityActiveHighlight;
 
         // --------------------------------------------------------------------
         // Internal state
@@ -187,6 +190,16 @@ namespace UltimateDungeon.UI
 
                 ApplyToRow(slot, allowed, initial, canEdit);
             }
+        }
+
+        /// <summary>
+        /// UI-only: highlight the active grant slot used for the hotbar.
+        /// </summary>
+        public void SetActiveGrantSlot(AbilityGrantSlot activeSlot)
+        {
+            SetActiveHighlight(primaryActiveHighlight, activeSlot == AbilityGrantSlot.Primary);
+            SetActiveHighlight(secondaryActiveHighlight, activeSlot == AbilityGrantSlot.Secondary);
+            SetActiveHighlight(utilityActiveHighlight, activeSlot == AbilityGrantSlot.Utility);
         }
 
         /// <summary>
@@ -332,21 +345,28 @@ namespace UltimateDungeon.UI
         private void SetRowVisible(AbilityGrantSlot slot, bool visible)
         {
             GameObject root = null;
+            GameObject highlight = null;
             switch (slot)
             {
                 case AbilityGrantSlot.Primary:
                     root = primaryRowRoot;
+                    highlight = primaryActiveHighlight;
                     break;
                 case AbilityGrantSlot.Secondary:
                     root = secondaryRowRoot;
+                    highlight = secondaryActiveHighlight;
                     break;
                 case AbilityGrantSlot.Utility:
                     root = utilityRowRoot;
+                    highlight = utilityActiveHighlight;
                     break;
             }
 
             if (root != null)
                 root.SetActive(visible);
+
+            if (!visible)
+                SetActiveHighlight(highlight, false);
         }
 
         // --------------------------------------------------------------------
@@ -382,6 +402,14 @@ namespace UltimateDungeon.UI
             }
 
             OnSelectionChanged?.Invoke(slot, chosen);
+        }
+
+        private static void SetActiveHighlight(GameObject highlight, bool enabled)
+        {
+            if (highlight == null)
+                return;
+
+            highlight.SetActive(enabled);
         }
 
         private static SpellId TryGetAllowed(SpellId[] allowed, int index)

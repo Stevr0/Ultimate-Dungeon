@@ -41,6 +41,14 @@ namespace UltimateDungeon.Spells
         public string shortDescription;
 
         // --------------------------------------------------------------------
+        // Presentation
+        // --------------------------------------------------------------------
+
+        [Header("Presentation")]
+        [Tooltip("Icon used by UI (hotbar, selection dropdowns, etc.).")]
+        public Sprite spellIcon;
+
+        // --------------------------------------------------------------------
         // Requirements
         // --------------------------------------------------------------------
 

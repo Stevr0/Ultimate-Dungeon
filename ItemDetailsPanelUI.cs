@@ -39,6 +39,7 @@ using UnityEngine.UI;
 using TMPro;
 using UltimateDungeon.Items;
 using UltimateDungeon.Spells;
+using UltimateDungeon.UI.Hotbar;
 
 namespace UltimateDungeon.UI
 {
@@ -82,12 +83,15 @@ namespace UltimateDungeon.UI
         // Current item being shown (so we can persist UI changes)
         private ItemDef _currentDef;
         private ItemInstance _currentInstance;
+        private EquipmentSlotId? _currentEquipmentSlot;
 
         // Typed reference to the granted abilities panel (if you can)
         // If you're still using MonoBehaviour + reflection, keep that,
         // but ALSO add this typed field so we can subscribe to events.
         [SerializeField] private ItemGrantedAbilitiesPanelUI grantedAbilitiesPanelTyped;
 
+        [Header("Hotbar Icon Updates (Optional)")]
+        [SerializeField] private HotbarSpellIconBinder hotbarIconBinder;
 
         private void Awake()
         {
@@ -107,6 +111,9 @@ namespace UltimateDungeon.UI
 
             if (grantedAbilitiesPanelTyped != null)
                 grantedAbilitiesPanelTyped.OnSelectionChanged += HandleAbilitySelectionChanged;
+
+            if (hotbarIconBinder == null)
+                hotbarIconBinder = FindFirstObjectByType<HotbarSpellIconBinder>(FindObjectsInactive.Include);
         }
 
         private void OnDisable()
@@ -136,7 +143,7 @@ namespace UltimateDungeon.UI
             if (!_catalog.TryGet(instance.itemDefId, out var def) || def == null)
                 return;
 
-            Show(def, instance);
+            Show(def, instance, equipmentSlot: null);
         }
 
         public void ShowFromEquipment(ItemDef def, ItemInstance instance = null)
@@ -145,13 +152,23 @@ namespace UltimateDungeon.UI
             if (def == null)
                 return;
 
-            Show(def, instance);
+            Show(def, instance, equipmentSlot: null);
+        }
+
+        public void ShowFromEquipment(EquipmentSlotId slotId, ItemDef def, ItemInstance instance = null)
+        {
+            // Equipment path with known slot (used for hotbar icon refresh).
+            if (def == null)
+                return;
+
+            Show(def, instance, slotId);
         }
 
         public void Hide()
         {
             // Hide the whole details panel
             gameObject.SetActive(false);
+            _currentEquipmentSlot = null;
 
             // Also hide the granted-abilities panel (if present)
             TryInvokeHide(ItemGrantedAbilitiesPanelUI);
@@ -175,10 +192,11 @@ namespace UltimateDungeon.UI
         // Internal rendering
         // --------------------------------------------------------------------
 
-        private void Show(ItemDef def, ItemInstance instance)
+        private void Show(ItemDef def, ItemInstance instance, EquipmentSlotId? equipmentSlot)
         {
             _currentDef = def;
             _currentInstance = instance;
+            _currentEquipmentSlot = equipmentSlot;
 
             gameObject.SetActive(true);
 
@@ -216,6 +234,8 @@ namespace UltimateDungeon.UI
             // This is intentionally *UI-only*. It just passes the same def + instance
             // the details panel is already using.
             TryInvokeGrantedAbilitiesPanel(ItemGrantedAbilitiesPanelUI, def, instance);
+
+            UpdateActiveGrantSlotHighlight();
         }
 
         private void HandleAbilitySelectionChanged(AbilityGrantSlot slot, SpellId chosen)
@@ -231,6 +251,33 @@ namespace UltimateDungeon.UI
 
             if (!ok)
                 Debug.LogWarning($"[ItemDetailsPanelUI] Rejecting selection {chosen} for {slot} (not allowed by def?)");
+
+            UpdateActiveGrantSlotHighlight();
+
+            if (ok && _currentEquipmentSlot.HasValue && hotbarIconBinder != null)
+                hotbarIconBinder.RefreshSlotForEquipmentSlot(_currentEquipmentSlot.Value);
+        }
+
+        private void UpdateActiveGrantSlotHighlight()
+        {
+            if (grantedAbilitiesPanelTyped == null || _currentDef == null)
+                return;
+
+            AbilityGrantSlot activeSlot = AbilityGrantSlot.Primary;
+
+            if (_currentInstance != null &&
+                _currentInstance.TryResolveActiveGrantSlot(_currentDef, allowUpdate: false, out var resolved))
+            {
+                activeSlot = resolved;
+            }
+            else
+            {
+                var granted = _currentDef.grantedAbilities.grantedAbilitySlots;
+                if (granted != null && granted.Length > 0)
+                    activeSlot = granted[0].slot;
+            }
+
+            grantedAbilitiesPanelTyped.SetActiveGrantSlot(activeSlot);
         }
 
 

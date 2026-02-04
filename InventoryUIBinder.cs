@@ -359,12 +359,15 @@ namespace UltimateDungeon.UI
             if (!TryGetEquippedForUI(_playerEquipment, slotId, out string equippedItemDefId))
                 return;
 
+            // Optional: try to pull the full ItemInstance for UI-only binding.
+            TryGetEquippedInstanceForUI(_playerEquipment, slotId, out var instance);
+
             // Resolve ItemDef and show.
             var def = TryResolveItemDef(itemDefCatalog, equippedItemDefId);
             if (def == null)
                 return;
 
-            itemDetailsPanel.ShowFromEquipment(def);
+            itemDetailsPanel.ShowFromEquipment(slotId, def, instance);
         }
 
         // --------------------------------------------------------------------
@@ -448,6 +451,39 @@ namespace UltimateDungeon.UI
             catch (Exception e)
             {
                 Debug.LogWarning($"[InventoryUIBinder] Failed to call GetEquippedForUI via reflection: {e.Message}");
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Attempts to call equipment.TryGetEquippedInstanceForUI(slotId, out ItemInstance instance)
+        /// via reflection. If unavailable, returns false.
+        /// </summary>
+        private static bool TryGetEquippedInstanceForUI(Component equipment, EquipmentSlotId slotId, out ItemInstance instance)
+        {
+            instance = null;
+            if (equipment == null) return false;
+
+            var t = equipment.GetType();
+            var m = t.GetMethod("TryGetEquippedInstanceForUI", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (m == null) return false;
+
+            var pars = m.GetParameters();
+            if (pars.Length != 2 || pars[0].ParameterType != typeof(EquipmentSlotId) || !pars[1].IsOut)
+                return false;
+
+            try
+            {
+                object[] args = new object[] { slotId, null };
+                bool ok = (bool)m.Invoke(equipment, args);
+                if (ok)
+                    instance = args[1] as ItemInstance;
+                return ok && instance != null;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[InventoryUIBinder] Failed to call TryGetEquippedInstanceForUI via reflection: {e.Message}");
             }
 
             return false;
