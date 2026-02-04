@@ -115,7 +115,10 @@ namespace UltimateDungeon.UI
             }
 
             if (grantedAbilitiesPanelTyped != null)
+            {
                 grantedAbilitiesPanelTyped.OnSelectionChanged += HandleAbilitySelectionChanged;
+                grantedAbilitiesPanelTyped.OnActiveSlotRequested += HandleActiveSlotRequested;
+            }
 
             if (hotbarIconBinder == null)
                 hotbarIconBinder = FindFirstObjectByType<HotbarSpellIconBinder>(FindObjectsInactive.Include);
@@ -131,7 +134,10 @@ namespace UltimateDungeon.UI
                 cancelButton.onClick.RemoveListener(HandleCancelClicked);
 
             if (grantedAbilitiesPanelTyped != null)
+            {
                 grantedAbilitiesPanelTyped.OnSelectionChanged -= HandleAbilitySelectionChanged;
+                grantedAbilitiesPanelTyped.OnActiveSlotRequested -= HandleActiveSlotRequested;
+            }
 
             PlayerNetIdentity.LocalPlayerSpawned -= HandleLocalPlayerSpawned;
             UnbindEquipment();
@@ -445,6 +451,31 @@ namespace UltimateDungeon.UI
 
             if (ok && _currentEquipmentSlot.HasValue && hotbarIconBinder != null)
                 hotbarIconBinder.RefreshSlotForEquipmentSlot(_currentEquipmentSlot.Value);
+        }
+
+        private void HandleActiveSlotRequested(AbilityGrantSlot slot)
+        {
+            if (_currentDef == null)
+                return;
+
+            if (grantedAbilitiesPanelTyped != null)
+                grantedAbilitiesPanelTyped.SetActiveGrantSlot(slot);
+
+            if (_currentEquipmentSlot.HasValue && _equipment != null)
+            {
+                _equipment.RequestSetActiveGrantSlot(_currentEquipmentSlot.Value, slot);
+
+                if (hotbarIconBinder != null)
+                    hotbarIconBinder.RefreshSlotForEquipmentSlot(_currentEquipmentSlot.Value);
+
+                return;
+            }
+
+            if (_currentInstance == null)
+                return;
+
+            _currentInstance.TrySetActiveGrantSlotForHotbar(_currentDef, slot);
+            UpdateActiveGrantSlotHighlight();
         }
 
         private void UpdateActiveGrantSlotHighlight()

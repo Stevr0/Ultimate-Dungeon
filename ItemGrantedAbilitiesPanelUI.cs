@@ -67,6 +67,11 @@ namespace UltimateDungeon.UI
         /// </summary>
         public event Action<AbilityGrantSlot, SpellId> OnSelectionChanged;
 
+        /// <summary>
+        /// Fired when the user clicks a row to request an active hotbar slot.
+        /// </summary>
+        public event Action<AbilityGrantSlot> OnActiveSlotRequested;
+
         // --------------------------------------------------------------------
         // Row references (3 max, because schema is capped at 3)
         // --------------------------------------------------------------------
@@ -113,6 +118,10 @@ namespace UltimateDungeon.UI
             HookDropdown(primaryDropdown, AbilityGrantSlot.Primary);
             HookDropdown(secondaryDropdown, AbilityGrantSlot.Secondary);
             HookDropdown(utilityDropdown, AbilityGrantSlot.Utility);
+
+            HookRowClick(primaryRowRoot, AbilityGrantSlot.Primary);
+            HookRowClick(secondaryRowRoot, AbilityGrantSlot.Secondary);
+            HookRowClick(utilityRowRoot, AbilityGrantSlot.Utility);
         }
 
         private void HookDropdown(TMP_Dropdown dd, AbilityGrantSlot slot)
@@ -125,6 +134,18 @@ namespace UltimateDungeon.UI
 
             // Add our listener.
             dd.onValueChanged.AddListener(index => HandleDropdownChanged(slot, index));
+        }
+
+        private void HookRowClick(GameObject rowRoot, AbilityGrantSlot slot)
+        {
+            if (rowRoot == null)
+                return;
+
+            var handler = rowRoot.GetComponent<AbilityGrantSlotRowClickHandler>();
+            if (handler == null)
+                handler = rowRoot.AddComponent<AbilityGrantSlotRowClickHandler>();
+
+            handler.Configure(slot, HandleRowClicked);
         }
 
         // --------------------------------------------------------------------
@@ -402,6 +423,15 @@ namespace UltimateDungeon.UI
             }
 
             OnSelectionChanged?.Invoke(slot, chosen);
+        }
+
+        private void HandleRowClicked(AbilityGrantSlot slot)
+        {
+            if (_isBinding)
+                return;
+
+            Debug.Log($"[AbilityUI] Active slot requested: {slot}");
+            OnActiveSlotRequested?.Invoke(slot);
         }
 
         private static void SetActiveHighlight(GameObject highlight, bool enabled)

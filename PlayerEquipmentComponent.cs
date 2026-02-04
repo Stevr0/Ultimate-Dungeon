@@ -172,6 +172,12 @@ namespace UltimateDungeon.Items
             RequestSetAbilitySelectionServerRpc(uiSlot, grantSlot, (int)spellId);
         }
 
+        public void RequestSetActiveGrantSlot(EquipmentSlotId uiSlot, AbilityGrantSlot slot)
+        {
+            if (!IsOwner) return;
+            RequestSetActiveGrantSlotServerRpc(uiSlot, slot);
+        }
+
         // --------------------------------------------------------------------
         // Server logic
         // --------------------------------------------------------------------
@@ -301,6 +307,48 @@ namespace UltimateDungeon.Items
 
             BuildEquippedSnapshot(instance, def, out var activeSlot, out var primarySpell, out var secondarySpell, out var utilitySpell);
             SetEquipped(uiSlot, instance.itemDefId, instance.stackCount, (byte)activeSlot, (int)primarySpell, (int)secondarySpell, (int)utilitySpell);
+        }
+
+        [ServerRpc]
+        private void RequestSetActiveGrantSlotServerRpc(
+            EquipmentSlotId uiSlot,
+            AbilityGrantSlot slot,
+            ServerRpcParams rpcParams = default)
+        {
+            if (!IsServer) return;
+
+            if (rpcParams.Receive.SenderClientId != OwnerClientId)
+                return;
+
+            if (itemDefCatalog == null)
+                return;
+
+            if (!_equippedInstances.TryGetValue(uiSlot, out var instance) || instance == null)
+                return;
+
+            if (!itemDefCatalog.TryGet(instance.itemDefId, out var def) || def == null)
+                return;
+
+            if (TryGetComponent(out ActorComponent actor) && actor.State == CombatState.InCombat)
+                return;
+
+            var granted = def.grantedAbilities.grantedAbilitySlots;
+            if (!IsGrantSlotAllowed(granted, slot))
+                return;
+
+            instance.activeGrantSlot = slot;
+
+            for (int i = 0; i < EquippedNet.Count; i++)
+            {
+                if (EquippedNet[i].slot != uiSlot)
+                    continue;
+
+                var equipped = EquippedNet[i];
+                equipped.activeGrantSlotForHotbar = (byte)slot;
+                EquippedNet[i] = equipped;
+                Debug.Log($"[Server] Active slot set: equip={uiSlot} slot={slot}");
+                return;
+            }
         }
 
         private void InitializeSlotsServer()
