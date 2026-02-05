@@ -126,7 +126,25 @@ Define:
 **Rule (LOCKED):**
 - Enhancement rolls `affixCount` uniformly (or per enhancement rules) within `0..Nmax(skill)`.
 
-> Whether it’s uniform or weighted is owned by the Enhancement system spec (future).
+### C) Enhancement (Crafting) — Success Chance
+
+**Rule (LOCKED):** Enhancement affix success chance is determined by the player’s relevant skill.
+
+Define:
+- `skill` = player’s crafting skill value (0–100)
+- `Nmax(skill)` = Success chance percentage of affixes being applied by enhancement
+
+**Nmax(skill) (LOCKED):**
+
+| Skill Range | Nmax |
+|---:|---:|
+| 0–19.9 | 0% |
+| 20–39.9 | 10% |
+| 40–59.9 | 20% |
+| 60–79.9 | 30% |
+| 80–99.9 | 40% |
+| 100.0 | 50% |
+
 
 ---
 
@@ -179,6 +197,7 @@ They do **not** require mana, reagents, cast time, targeting validation, or line
 | AffixId | Display Name | Type | Range | Stacking | Eligible | Notes |
 |---|---|---|---|---|---|---|
 | Magic_FasterCasting | Faster Casting | Flat | 0..4 | HighestOnly | Jewelry | Time scaling owned by Magic rules |
+| Magic_CastingRecovery | Casting Recovery | Flat | 0..4 | HighestOnly | Jewelry | Time scaling owned by Magic rules |
 
 ---
 
