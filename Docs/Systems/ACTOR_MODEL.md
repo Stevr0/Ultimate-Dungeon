@@ -36,7 +36,7 @@ Combat Core consumes Actors after **Actor rules** validate legality.
 ### This document does NOT own
 - Combat math / hit / damage resolution *(see `COMBAT_CORE.md`)*
 - Player stat aggregation *(see `PLAYER_COMBAT_STATS.md`)*
-- Spell mechanics *(see `MAGIC_AND_SPELLS.md`)*
+- Spell mechanics *(see `SPELL_CATEGORY_MODEL.md`)*
 - Status effect definitions *(see `STATUS_EFFECT_CATALOG.md`)*
 - Items, affixes, durability schemas *(see item docs)*
 
@@ -302,4 +302,3 @@ Any change must:
 - Increment Version
 - Update Last Updated
 - Call out impacted dependent systems (Targeting, Combat Core, UI, Housing)
-
