@@ -188,15 +188,15 @@ namespace UltimateDungeon.Items
 
             switch (def.family)
             {
-                case ItemDef.ItemFamily.Mainhand:
+                case ItemFamily.Mainhand:
                     return AffixEligibility.Weapon;
-                case ItemDef.ItemFamily.Head:
-                case ItemDef.ItemFamily.Chest:
-                case ItemDef.ItemFamily.Foot:
+                case ItemFamily.Head:
+                case ItemFamily.Chest:
+                case ItemFamily.Foot:
                     return AffixEligibility.Armor;
-                case ItemDef.ItemFamily.Offhand:
+                case ItemFamily.Offhand:
                     return AffixEligibility.Shield;
-                case ItemDef.ItemFamily.Neck:
+                case ItemFamily.Neck:
                     return AffixEligibility.Jewelry;
                 default:
                     return AffixEligibility.Any;
