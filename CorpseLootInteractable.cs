@@ -44,9 +44,12 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
     [Tooltip("ItemDefCatalog asset with all ItemDefs. Needed so the corpse can validate/stack items.")]
     [SerializeField] private ItemDefCatalog itemDefCatalog;
 
+    [Tooltip("Factory used to create server-authoritative ItemInstances.")]
+    [SerializeField] private ItemInstanceFactory itemInstanceFactory;
+
     [Header("Loot (DEBUG / SPIKE)")]
     [Tooltip("ItemDefId to seed into the corpse when spawned (v0.1 hardcoded)")]
-    [SerializeField] private string debugItemDefId = "utility_bandage";
+    [SerializeField] private string debugItemDefId = "mainhand_sword_shortsword";
 
     // Runtime-only inventory for the corpse
     private InventoryRuntimeModel _inventory;
@@ -80,17 +83,22 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
             return;
         }
 
+        if (itemInstanceFactory == null)
+        {
+            Debug.LogError("[CorpseLootInteractable] Missing ItemInstanceFactory reference on corpse prefab.");
+            return;
+        }
+
         // Seed a single debug item (this proves loot transfer end-to-end)
         if (!string.IsNullOrWhiteSpace(debugItemDefId))
         {
-            var item = new ItemInstance(debugItemDefId)
+            uint seed = BuildLootSeed(NetworkObjectId, debugItemDefId);
+            if (itemInstanceFactory.TryCreateLootItem(debugItemDefId, seed, out var item))
             {
-                stackCount = 1
-            };
-
-            var addResult = _inventory.TryAdd(item, itemDefCatalog, out _);
-            if (addResult != InventoryOpResult.Success)
-                Debug.LogWarning($"[CorpseLootInteractable] Failed to seed loot '{debugItemDefId}': {addResult}");
+                var addResult = _inventory.TryAdd(item, itemDefCatalog, out _);
+                if (addResult != InventoryOpResult.Success)
+                    Debug.LogWarning($"[CorpseLootInteractable] Failed to seed loot '{debugItemDefId}': {addResult}");
+            }
         }
     }
 
@@ -106,6 +114,12 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
 
         if (interactor == null)
             return;
+
+        if (_inventory == null)
+        {
+            Debug.LogWarning("[CorpseLootInteractable] Corpse inventory is missing; aborting loot transfer.");
+            return;
+        }
 
         // We only allow players to loot
         if (!interactor.TryGetComponent(out PlayerInventoryComponent playerInventory))
@@ -144,6 +158,33 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
 
         if (!anyRemaining)
             NetworkObject.Despawn(destroy: true);
+    }
+
+    private static uint BuildLootSeed(ulong networkObjectId, string itemDefId)
+    {
+        const uint salt = 0x9E3779B9u;
+        uint hash = StableStringHash(itemDefId);
+        uint seed = (uint)networkObjectId;
+        seed ^= hash;
+        seed = (seed * 16777619u) ^ salt;
+        return seed;
+    }
+
+    private static uint StableStringHash(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return 0u;
+
+        unchecked
+        {
+            uint hash = 2166136261u;
+            for (int i = 0; i < value.Length; i++)
+            {
+                hash ^= value[i];
+                hash *= 16777619u;
+            }
+            return hash;
+        }
     }
 
     #if UNITY_EDITOR
