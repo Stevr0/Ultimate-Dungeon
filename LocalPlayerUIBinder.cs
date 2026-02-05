@@ -95,9 +95,10 @@ namespace UltimateDungeon.UI.Binding
 
             // 2) Stats panel (unchanged)
             var statsNet = identity.GetComponentInChildren<UltimateDungeon.Players.Networking.PlayerStatsNet>(true);
+            var combatStatsNet = identity.GetComponentInChildren<UltimateDungeon.Players.Networking.PlayerCombatStatsNet>(true);
 
             if (characterStatsPanel != null)
-                characterStatsPanel.Bind(statsNet);
+                characterStatsPanel.Bind(statsNet, combatStatsNet);
         }
 
         [ContextMenu("Auto-Wire UI References")]

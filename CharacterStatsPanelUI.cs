@@ -1,8 +1,7 @@
-using System;
 using System.Globalization;
-using System.Reflection;
 using UnityEngine;
 using TMPro;
+using Unity.Collections;
 
 // -----------------------------------------------------------------------------
 // CharacterStatsPanelUI.cs
@@ -27,44 +26,140 @@ namespace UltimateDungeon.UI.Panels
         [SerializeField] private TextMeshProUGUI actionGatesText;
         [SerializeField] private TextMeshProUGUI debugFooterText;
 
-        public void Refresh(UltimateDungeon.Players.PlayerStats stats, UltimateDungeon.Combat.PlayerCombatStats combatStats)
+        private UltimateDungeon.Players.Networking.PlayerStatsNet _statsNet;
+        private UltimateDungeon.Players.Networking.PlayerCombatStatsNet _combatStatsNet;
+
+        private void OnDisable()
         {
-            string strValue = stats != null ? stats.STR.ToString() : "-";
-            string dexValue = stats != null ? stats.DEX.ToString() : "-";
-            string intValue = stats != null ? stats.INT.ToString() : "-";
+            Unsubscribe();
+        }
+
+        /// <summary>
+        /// Bind to replicated player stats + combat stats.
+        /// </summary>
+        public void Bind(
+            UltimateDungeon.Players.Networking.PlayerStatsNet statsNet,
+            UltimateDungeon.Players.Networking.PlayerCombatStatsNet combatStatsNet)
+        {
+            Unsubscribe();
+
+            _statsNet = statsNet;
+            _combatStatsNet = combatStatsNet;
+
+            Subscribe();
+            Refresh();
+        }
+
+        private void Subscribe()
+        {
+            if (_statsNet != null)
+            {
+                _statsNet.STR.OnValueChanged += OnStatChanged;
+                _statsNet.DEX.OnValueChanged += OnStatChanged;
+                _statsNet.INT.OnValueChanged += OnStatChanged;
+            }
+
+            if (_combatStatsNet != null)
+            {
+                _combatStatsNet.AttackerHciPct.OnValueChanged += OnCombatFloatChanged;
+                _combatStatsNet.DefenderDciPct.OnValueChanged += OnCombatFloatChanged;
+                _combatStatsNet.DamageIncreasePct.OnValueChanged += OnCombatFloatChanged;
+
+                _combatStatsNet.ResistPhysical.OnValueChanged += OnCombatIntChanged;
+                _combatStatsNet.ResistFire.OnValueChanged += OnCombatIntChanged;
+                _combatStatsNet.ResistCold.OnValueChanged += OnCombatIntChanged;
+                _combatStatsNet.ResistPoison.OnValueChanged += OnCombatIntChanged;
+                _combatStatsNet.ResistEnergy.OnValueChanged += OnCombatIntChanged;
+
+                _combatStatsNet.WeaponName.OnValueChanged += OnWeaponNameChanged;
+                _combatStatsNet.WeaponMinDamage.OnValueChanged += OnCombatIntChanged;
+                _combatStatsNet.WeaponMaxDamage.OnValueChanged += OnCombatIntChanged;
+                _combatStatsNet.WeaponSwingSpeedSeconds.OnValueChanged += OnCombatFloatChanged;
+
+                _combatStatsNet.CanAttack.OnValueChanged += OnCombatBoolChanged;
+                _combatStatsNet.CanCast.OnValueChanged += OnCombatBoolChanged;
+                _combatStatsNet.CanMove.OnValueChanged += OnCombatBoolChanged;
+                _combatStatsNet.CanBandage.OnValueChanged += OnCombatBoolChanged;
+            }
+        }
+
+        private void Unsubscribe()
+        {
+            if (_statsNet != null)
+            {
+                _statsNet.STR.OnValueChanged -= OnStatChanged;
+                _statsNet.DEX.OnValueChanged -= OnStatChanged;
+                _statsNet.INT.OnValueChanged -= OnStatChanged;
+            }
+
+            if (_combatStatsNet != null)
+            {
+                _combatStatsNet.AttackerHciPct.OnValueChanged -= OnCombatFloatChanged;
+                _combatStatsNet.DefenderDciPct.OnValueChanged -= OnCombatFloatChanged;
+                _combatStatsNet.DamageIncreasePct.OnValueChanged -= OnCombatFloatChanged;
+
+                _combatStatsNet.ResistPhysical.OnValueChanged -= OnCombatIntChanged;
+                _combatStatsNet.ResistFire.OnValueChanged -= OnCombatIntChanged;
+                _combatStatsNet.ResistCold.OnValueChanged -= OnCombatIntChanged;
+                _combatStatsNet.ResistPoison.OnValueChanged -= OnCombatIntChanged;
+                _combatStatsNet.ResistEnergy.OnValueChanged -= OnCombatIntChanged;
+
+                _combatStatsNet.WeaponName.OnValueChanged -= OnWeaponNameChanged;
+                _combatStatsNet.WeaponMinDamage.OnValueChanged -= OnCombatIntChanged;
+                _combatStatsNet.WeaponMaxDamage.OnValueChanged -= OnCombatIntChanged;
+                _combatStatsNet.WeaponSwingSpeedSeconds.OnValueChanged -= OnCombatFloatChanged;
+
+                _combatStatsNet.CanAttack.OnValueChanged -= OnCombatBoolChanged;
+                _combatStatsNet.CanCast.OnValueChanged -= OnCombatBoolChanged;
+                _combatStatsNet.CanMove.OnValueChanged -= OnCombatBoolChanged;
+                _combatStatsNet.CanBandage.OnValueChanged -= OnCombatBoolChanged;
+            }
+        }
+
+        private void OnStatChanged(int previous, int current) => Refresh();
+        private void OnCombatIntChanged(int previous, int current) => Refresh();
+        private void OnCombatFloatChanged(float previous, float current) => Refresh();
+        private void OnCombatBoolChanged(bool previous, bool current) => Refresh();
+        private void OnWeaponNameChanged(FixedString64Bytes previous, FixedString64Bytes current) => Refresh();
+
+        public void Refresh()
+        {
+            string strValue = _statsNet != null ? _statsNet.STR.Value.ToString() : "-";
+            string dexValue = _statsNet != null ? _statsNet.DEX.Value.ToString() : "-";
+            string intValue = _statsNet != null ? _statsNet.INT.Value.ToString() : "-";
 
             SetText(strText, $"STR: {strValue}");
             SetText(dexText, $"DEX: {dexValue}");
             SetText(intText, $"INT: {intValue}");
 
-            string hciValue = FormatPercent(GetFloat(combatStats, "attackerHciPct"));
-            string dciValue = FormatPercent(GetFloat(combatStats, "defenderDciPct"));
-            string diValue = FormatPercent(GetFloat(combatStats, "damageIncreasePct"));
+            string hciValue = FormatPercent(_combatStatsNet != null ? _combatStatsNet.AttackerHciPct.Value : (float?)null);
+            string dciValue = FormatPercent(_combatStatsNet != null ? _combatStatsNet.DefenderDciPct.Value : (float?)null);
+            string diValue = FormatPercent(_combatStatsNet != null ? _combatStatsNet.DamageIncreasePct.Value : (float?)null);
 
             SetText(hciText, $"HCI: {hciValue}");
             SetText(dciText, $"DCI: {dciValue}");
             SetText(diText, $"DI: {diValue}");
 
-            string resistPhysical = FormatInt(GetInt(combatStats, "resistPhysical"));
-            string resistFire = FormatInt(GetInt(combatStats, "resistFire"));
-            string resistCold = FormatInt(GetInt(combatStats, "resistCold"));
-            string resistPoison = FormatInt(GetInt(combatStats, "resistPoison"));
-            string resistEnergy = FormatInt(GetInt(combatStats, "resistEnergy"));
+            string resistPhysical = FormatInt(_combatStatsNet != null ? _combatStatsNet.ResistPhysical.Value : (int?)null);
+            string resistFire = FormatInt(_combatStatsNet != null ? _combatStatsNet.ResistFire.Value : (int?)null);
+            string resistCold = FormatInt(_combatStatsNet != null ? _combatStatsNet.ResistCold.Value : (int?)null);
+            string resistPoison = FormatInt(_combatStatsNet != null ? _combatStatsNet.ResistPoison.Value : (int?)null);
+            string resistEnergy = FormatInt(_combatStatsNet != null ? _combatStatsNet.ResistEnergy.Value : (int?)null);
 
             SetText(resistsText,
                 $"Resists: {resistPhysical} / {resistFire} / {resistCold} / {resistPoison} / {resistEnergy}");
 
-            SetText(weaponText, BuildWeaponLine(combatStats));
+            SetText(weaponText, BuildWeaponLine());
 
-            string canAttack = FormatBool(GetBool(combatStats, "canAttack"));
-            string canCast = FormatBool(GetBool(combatStats, "canCast"));
-            string canMove = FormatBool(GetBool(combatStats, "canMove"));
-            string canBandage = FormatBool(GetBool(combatStats, "canBandage"));
+            string canAttack = FormatBool(_combatStatsNet != null ? _combatStatsNet.CanAttack.Value : (bool?)null);
+            string canCast = FormatBool(_combatStatsNet != null ? _combatStatsNet.CanCast.Value : (bool?)null);
+            string canMove = FormatBool(_combatStatsNet != null ? _combatStatsNet.CanMove.Value : (bool?)null);
+            string canBandage = FormatBool(_combatStatsNet != null ? _combatStatsNet.CanBandage.Value : (bool?)null);
 
             SetText(actionGatesText,
                 $"Gates: canAttack={canAttack} | canCast={canCast} | canMove={canMove} | canBandage={canBandage}");
 
-            string source = combatStats != null ? "Server (authoritative)" : "Local/Unknown";
+            string source = _combatStatsNet != null ? "Net Snapshot (Server)" : "-";
             SetText(debugFooterText, $"Stats Source: {source}");
         }
 
@@ -91,119 +186,22 @@ namespace UltimateDungeon.UI.Panels
             return value.Value ? "Y" : "N";
         }
 
-        private static float? GetFloat(object source, string memberName)
+        private string BuildWeaponLine()
         {
-            if (!TryGetMemberValue(source, memberName, out var raw) || raw == null)
-                return null;
+            if (_combatStatsNet == null)
+                return "Weapon: -";
 
-            if (raw is float floatValue) return floatValue;
-            if (raw is double doubleValue) return (float)doubleValue;
-            if (raw is int intValue) return intValue;
-            if (raw is long longValue) return longValue;
-            if (raw is short shortValue) return shortValue;
+            string weaponName = _combatStatsNet.WeaponName.Value.ToString();
+            string displayName = string.IsNullOrWhiteSpace(weaponName) ? "Unarmed" : weaponName;
 
-            if (float.TryParse(raw.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
-                return parsed;
+            int minDamage = _combatStatsNet.WeaponMinDamage.Value;
+            int maxDamage = _combatStatsNet.WeaponMaxDamage.Value;
+            float swingSpeed = _combatStatsNet.WeaponSwingSpeedSeconds.Value;
 
-            return null;
-        }
+            string damageRange = (minDamage == 0 && maxDamage == 0) ? "-" : $"{minDamage}-{maxDamage}";
+            string swingText = swingSpeed > 0f ? $"{swingSpeed:0.##}s" : "-";
 
-        private static int? GetInt(object source, string memberName)
-        {
-            if (!TryGetMemberValue(source, memberName, out var raw) || raw == null)
-                return null;
-
-            if (raw is int intValue) return intValue;
-            if (raw is short shortValue) return shortValue;
-            if (raw is long longValue) return (int)longValue;
-            if (raw is float floatValue) return Mathf.RoundToInt(floatValue);
-            if (raw is double doubleValue) return Mathf.RoundToInt((float)doubleValue);
-
-            if (int.TryParse(raw.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
-                return parsed;
-
-            return null;
-        }
-
-        private static bool? GetBool(object source, string memberName)
-        {
-            if (!TryGetMemberValue(source, memberName, out var raw) || raw == null)
-                return null;
-
-            if (raw is bool boolValue) return boolValue;
-
-            if (bool.TryParse(raw.ToString(), out bool parsed))
-                return parsed;
-
-            return null;
-        }
-
-        private static string BuildWeaponLine(object combatStats)
-        {
-            object weapon = GetMemberValue(combatStats, "weapon");
-            if (weapon == null)
-                return "Weapon: Unarmed";
-
-            string name = GetFirstStringMember(weapon, "displayName", "name", "weaponName", "itemName");
-            string minDamage = FormatInt(GetInt(weapon, "minDamage"));
-            string maxDamage = FormatInt(GetInt(weapon, "maxDamage"));
-            string swingSpeed = FormatSwingSpeed(GetFloat(weapon, "swingSpeedSeconds"));
-
-            string displayName = string.IsNullOrWhiteSpace(name) ? "Unarmed" : name;
-            string damageRange = minDamage == "-" || maxDamage == "-" ? "-" : $"{minDamage}-{maxDamage}";
-
-            return $"Weapon: {displayName} | DMG {damageRange} | Swing {swingSpeed}";
-        }
-
-        private static string FormatSwingSpeed(float? value)
-        {
-            if (!value.HasValue) return "-";
-            return $"{value.Value:0.##}s";
-        }
-
-        private static bool TryGetMemberValue(object source, string memberName, out object value)
-        {
-            value = null;
-            if (source == null) return false;
-
-            Type type = source.GetType();
-            PropertyInfo prop = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.Instance);
-            if (prop != null)
-            {
-                value = prop.GetValue(source);
-                return true;
-            }
-
-            FieldInfo field = type.GetField(memberName, BindingFlags.Public | BindingFlags.Instance);
-            if (field != null)
-            {
-                value = field.GetValue(source);
-                return true;
-            }
-
-            return false;
-        }
-
-        private static object GetMemberValue(object source, string memberName)
-        {
-            return TryGetMemberValue(source, memberName, out var value) ? value : null;
-        }
-
-        private static string GetFirstStringMember(object source, params string[] memberNames)
-        {
-            if (source == null) return null;
-
-            foreach (string memberName in memberNames)
-            {
-                if (TryGetMemberValue(source, memberName, out var raw) && raw != null)
-                {
-                    string text = raw.ToString();
-                    if (!string.IsNullOrWhiteSpace(text))
-                        return text;
-                }
-            }
-
-            return null;
+            return $"Weapon: {displayName} | DMG {damageRange} | Swing {swingText}";
         }
     }
 }
