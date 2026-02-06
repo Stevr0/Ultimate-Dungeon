@@ -79,7 +79,7 @@ All derived values must be computable from:
 ## VITALS (LOCKED)
 
 ### Vital Caps
-- **Absolute Max Cap per Vital: 150**
+- **Absolute Max Cap per Vital: 200**
 
 ### Derivation Rules (LOCKED)
 - **Max HP = STR** *2
