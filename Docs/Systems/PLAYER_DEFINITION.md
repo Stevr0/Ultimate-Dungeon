@@ -1,7 +1,7 @@
 # PLAYER_DEFINITION.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 0.5  
-Last Updated: 2026-01-28  
+Version: 0.6  
+Last Updated: 2026-02-06  
 
 ---
 
@@ -16,7 +16,7 @@ This is a **ScriptableObject-first** contract:
 
 This document owns:
 - Player baselines (attributes, vitals derivation, regen)
-- Player-wide caps (vitals cap, resistance cap, skill caps)
+- Player-wide caps (attributes, vitals, resistances, skills)
 - Currency rules (Coins: Held vs Banked)
 - Player rules for insurance and death-loss interaction
 
@@ -24,6 +24,8 @@ This document does **not** own:
 - SkillId list (owned by `SKILL_ID_CATALOG.md`)
 - Combat formulas and order-of-operations (owned by `COMBAT_CORE.md`)
 - Item schemas or item lists (owned by `ITEM_DEF_SCHEMA.md` / `ITEM_CATALOG.md`)
+- Affix definitions, ranges, stacking (owned by `ITEM_AFFIX_CATALOG.md`)
+- Status definitions (owned by `STATUS_EFFECT_CATALOG.md`)
 
 If a player rule is not defined here (or in the referenced authoritative docs), **it does not exist**.
 
@@ -68,32 +70,59 @@ All derived values must be computable from:
 
 ---
 
-## STARTING ATTRIBUTES (LOCKED)
+## ATTRIBUTES (LOCKED)
 
+### Starting Attributes (LOCKED)
 - `int baseSTR = 10`
 - `int baseDEX = 10`
 - `int baseINT = 10`
+
+### Attribute Caps (LOCKED)
+- **Absolute Max Cap per Attribute: 150**
+  - `int attributeCap = 150`
+
+**Meaning:**
+- Effective STR/DEX/INT (after item affixes + status modifiers) may not exceed 150.
+
+**Notes:**
+- The stat aggregation *sources* and *policies* are owned by `PLAYER_COMBAT_STATS.md`.
+- The cap values themselves are owned here.
 
 ---
 
 ## VITALS (LOCKED)
 
 ### Vital Caps
-- **Absolute Max Cap per Vital: 200**
+- **Absolute Max Cap per Vital: 150**
+  - `int vitalCap = 150`
 
 ### Derivation Rules (LOCKED)
-- **Max HP = STR** *2
-- **Max Stamina = DEX** *2
-- **Max Mana = INT** *2
+- **Max HP = STR**, up to 150
+- **Max Stamina = DEX**, up to 150
+- **Max Mana = INT**, up to 150
 
 > Any value beyond the attribute-derived amount must come from:
-> - Item bonuses (e.g., `Vital_MaxHP` affix)
+> - Item bonuses (e.g., `Vital_MaxHealth` affix)
 > - Status effects
 
 ### Regen Rules (LOCKED — Classic / UO-style)
 - `float hpRegenPerSec = 0.05f` *(very slow; healing items/spells are primary)*
 - `float staminaRegenPerSec = 1.0f`
 - `float manaRegenPerSec = 0.5f`
+
+### Regen Modifiers (SOURCE + CAP)
+Regen bonuses may come from:
+- Item affixes: `Regenerate_Health`, `Regenerate_Stamina`, `Regenerate_Mana` *(see `ITEM_AFFIX_CATALOG.md`)*
+- Status effects (future)
+
+**Regen cap policy (LOCKED):**
+- Regen modifiers are clamped by a per-channel cap owned here.
+- Recommended caps (v0.6):
+  - `float regenHealthBonusCapPct = 0.50f` *(+50% max)*
+  - `float regenStaminaBonusCapPct = 1.00f` *(+100% max)*
+  - `float regenManaBonusCapPct = 1.00f` *(+100% max)*
+
+> Exact application policy (sum/multiply) is owned by the aggregator; these are only the caps.
 
 ---
 
@@ -107,6 +136,7 @@ All derived values must be computable from:
 
 - Resistance Cap:
   - **70 max per resistance**
+    - `int resistanceCap = 70`
 
 > Aggregation of base armor resists + affix resists + status resists is owned by `PLAYER_COMBAT_STATS.md`.
 
@@ -133,12 +163,6 @@ Combat formulas and execution order are defined in `COMBAT_CORE.md`.
 - `int totalSkillCap = 700`
 - `int individualSkillMax = 100`
 
-**Meaning:**
-- A player can reach **7 skills at 100** (700 total), or
-- More skills at lower values (e.g., 14 skills at 50), as long as:
-  - No individual skill exceeds **100**
-  - Total does not exceed **700**
-
 ### Starting Skills (PROPOSED)
 Start at 0 unless specified.
 - A list of `(SkillId, startValue)`
@@ -155,8 +179,6 @@ Each skill has one of three states:
 **Authority:**
 - The server validates all gain/loss requests against these locks.
 
-> Skill check + gain logic is executed by `SkillUseResolver` / `SkillGainSystem` per `PROGRESSION.md`.
-
 ---
 
 ## CURRENCY — COINS (LOCKED)
@@ -172,30 +194,13 @@ The player sees two values:
 ### Rules
 
 1. **Looting in the dungeon adds to Held Coins**
-   - Coins picked up while in dungeon content are added to **Held Coins**.
-
 2. **Exiting the dungeon banks Held Coins automatically**
-   - When a player exits the dungeon (returns to village/safe zone), the server:
-     - Moves **all Held Coins → Banked Coins**
-     - Held Coins becomes 0
-
 3. **Only Banked Coins can be used for economy actions**
-   Players can only:
-   - Purchase from shops
-   - Trade
-   - Pay insurance
-   using **Banked Coins**.
-
 4. **Held Coins drop on death (dungeon only)**
-   - If a player dies in the dungeon:
-     - Their **Held Coins remain on the corpse**
-     - Banked Coins are not affected
 
 ### Starting Values (Recommended)
 - `int startingBankedCoins = 0`
 - `int startingHeldCoins = 0`
-
-> Runtime storage should live in an authoritative player wallet component.
 
 ---
 
@@ -210,8 +215,6 @@ The player sees two values:
 - Player has a bank container
 - Player has a **Banked Coins** balance
 - **Insurance Auto-Renew draws from Banked Coins** (LOCKED)
-
-> Container schemas and item lists are defined by the item system docs.
 
 ---
 
@@ -238,46 +241,13 @@ Insurance is **per-item** and optional.
 
 ---
 
-## DEATH & LOOT INTERACTION (PLAYER RULES)
+## CHARACTER SHEET PROJECTION (REFERENCE)
 
-On player death (dungeon):
-- Corpse container is created
-- Uninsured items transfer to corpse
-- Insured items remain with player
-- Held Coins remain on corpse
-- Banked Coins are untouched
+The Character Sheet UI should present a comprehensive list of possible player-facing stats.
 
-> Exact corpse transfer mechanics are implemented by the death/loot system, but must obey these rules.
-
----
-
-## NETWORKING OWNERSHIP RULES
-
-### Server-Authoritative State
-- Vitals (current/max)
-- Attributes + derived stats
-- Skill values + lock states
-- Inventory + bank container
-- Held Coins / Banked Coins balances
-- Equipment state
-- Status effects
-- Death/respawn
-
-### Client Responsibilities
-- Send input intents (move/attack/interact)
-- Render UI from replicated state
-
----
-
-## IMPLEMENTATION DEPENDENCIES (NEXT)
-
-With this document locked, you can implement safely:
-1. `PlayerDefinition` ScriptableObject
-2. `PlayerCore` (server binds runtime components)
-3. `PlayerStats` + `PlayerVitals`
-4. `PlayerSkillBook` + replication
-5. `PlayerWallet` (Held/Banked)
-6. Death pipeline hooks (corpse drop rules)
+- **Authoritative sources** remain the core docs (`PLAYER_COMBAT_STATS.md`, `ITEM_AFFIX_CATALOG.md`, `STATUS_EFFECT_CATALOG.md`).
+- The UI list itself is maintained in:
+  - `CHARACTER_SHEET_REFERENCE_LIST.md` *(UI projection list; non-authoritative)*
 
 ---
 
@@ -288,5 +258,5 @@ This document is **authoritative**.
 Any change must:
 - Increment Version
 - Update Last Updated
-- Explicitly call out combat/save-data implications
+- Call out dependent impacts (aggregation, UI, save migration)
 
