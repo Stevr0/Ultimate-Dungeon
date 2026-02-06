@@ -93,12 +93,41 @@ namespace UltimateDungeon.UI.Binding
             if (hudVitals != null)
                 hudVitals.Bind(actorVitals);
 
-            // 2) Stats panel (unchanged)
+            // 2) Stats panel
             var statsNet = identity.GetComponentInChildren<UltimateDungeon.Players.Networking.PlayerStatsNet>(true);
             var combatStatsNet = identity.GetComponentInChildren<UltimateDungeon.Players.Networking.PlayerCombatStatsNet>(true);
+            var skillBookNet = identity.GetComponentInChildren<UltimateDungeon.Players.Networking.PlayerSkillBookNet>(true);
+            var playerCore = identity.GetComponentInChildren<UltimateDungeon.Players.PlayerCore>(true);
+
+            var statusRuntime = FindInterfaceInChildren<UltimateDungeon.StatusEffects.IStatusEffectRuntime>(identity);
+            var currencyWallet = FindInterfaceInChildren<UltimateDungeon.Economy.IPlayerCurrencyWallet>(identity);
 
             if (characterStatsPanel != null)
-                characterStatsPanel.Bind(statsNet, combatStatsNet);
+            {
+                characterStatsPanel.Bind(
+                    statsNet,
+                    combatStatsNet,
+                    actorVitals,
+                    skillBookNet,
+                    playerCore,
+                    statusRuntime,
+                    currencyWallet);
+            }
+        }
+
+        private static T FindInterfaceInChildren<T>(Component root) where T : class
+        {
+            if (root == null)
+                return null;
+
+            var behaviours = root.GetComponentsInChildren<MonoBehaviour>(true);
+            for (int i = 0; i < behaviours.Length; i++)
+            {
+                if (behaviours[i] is T match)
+                    return match;
+            }
+
+            return null;
         }
 
         [ContextMenu("Auto-Wire UI References")]
