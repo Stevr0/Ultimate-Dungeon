@@ -60,6 +60,12 @@ namespace UltimateDungeon.UI
         [Header("Stats (simple list)")]
         [SerializeField] private TMP_Text statsText;
 
+        [Header("Affixes")]
+        [SerializeField] private AffixCatalog affixCatalog;
+        [SerializeField] private TMP_Text affixesHeaderText;
+        [SerializeField] private Transform affixesContainer;
+        [SerializeField] private TMP_Text affixRowPrefab;
+
         [Header("Granted Abilities (Item -> Spell selection)")]
         [Tooltip(
             "Optional. If assigned, this script will try to call a method on the component\n" +
@@ -86,6 +92,7 @@ namespace UltimateDungeon.UI
         private ItemDef _currentDef;
         private ItemInstance _currentInstance;
         private EquipmentSlotId? _currentEquipmentSlot;
+        private readonly List<TMP_Text> _affixRows = new List<TMP_Text>();
 
         // Typed reference to the granted abilities panel (if you can)
         // If you're still using MonoBehaviour + reflection, keep that,
@@ -248,6 +255,7 @@ namespace UltimateDungeon.UI
             if (statsText != null)
                 statsText.text = BuildStatsBlock(def);
 
+            RenderAffixes(instance);
 
             // NEW: Hand off to the optional "granted abilities" panel.
             // This is intentionally *UI-only*. It just passes the same def + instance
@@ -530,6 +538,127 @@ namespace UltimateDungeon.UI
                     return string.Empty;
             }
         }
+
+        // --------------------------------------------------------------------
+        // Affix rendering
+        // --------------------------------------------------------------------
+
+        private void RenderAffixes(ItemInstance instance)
+        {
+            if (affixesContainer == null || affixRowPrefab == null)
+            {
+                if (affixesHeaderText != null)
+                {
+                    bool hasAffixes = instance != null && instance.affixes != null && instance.affixes.Count > 0;
+                    affixesHeaderText.text = hasAffixes ? "Affixes" : "Affixes: None";
+                }
+
+                if (affixesContainer == null || affixRowPrefab == null)
+                    return;
+            }
+
+            ClearAffixRows();
+
+            if (instance == null || instance.affixes == null || instance.affixes.Count == 0)
+            {
+                if (affixesHeaderText != null)
+                    affixesHeaderText.text = "Affixes: None";
+                else
+                    AddAffixRow("None");
+
+                return;
+            }
+
+            if (affixesHeaderText != null)
+                affixesHeaderText.text = "Affixes";
+
+            if (affixCatalog == null)
+            {
+                Debug.LogWarning("[ItemDetailsPanelUI] AffixCatalog is not assigned; cannot resolve affix names.");
+                foreach (var affix in instance.affixes)
+                    AddAffixRow($"{affix.id}: {FormatMagnitudeRaw(affix.magnitude)}");
+                return;
+            }
+
+            for (int i = 0; i < instance.affixes.Count; i++)
+            {
+                var affix = instance.affixes[i];
+                if (!affixCatalog.TryGet(affix.id, out var def) || def == null)
+                {
+                    AddAffixRow($"{affix.id}: {FormatMagnitudeRaw(affix.magnitude)}");
+                    continue;
+                }
+
+                AddAffixRow($"{def.displayName}: {FormatAffixMagnitude(def, affix.magnitude)}");
+            }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            LogAffixDebug(instance);
+#endif
+        }
+
+        private void ClearAffixRows()
+        {
+            for (int i = 0; i < _affixRows.Count; i++)
+            {
+                if (_affixRows[i] != null)
+                    Destroy(_affixRows[i].gameObject);
+            }
+
+            _affixRows.Clear();
+        }
+
+        private void AddAffixRow(string text)
+        {
+            var row = Instantiate(affixRowPrefab, affixesContainer);
+            row.text = text;
+            _affixRows.Add(row);
+        }
+
+        private static string FormatAffixMagnitude(AffixDef def, float magnitude)
+        {
+            string number = def.integerMagnitude
+                ? Mathf.RoundToInt(magnitude).ToString()
+                : magnitude.ToString("0.##");
+
+            string prefix = magnitude >= 0 ? "+" : string.Empty;
+
+            switch (def.valueType)
+            {
+                case AffixValueType.Percent:
+                case AffixValueType.ProcChance:
+                case AffixValueType.ProcPercent:
+                    return $"{prefix}{number}%";
+                default:
+                    return $"{prefix}{number}";
+            }
+        }
+
+        private static string FormatMagnitudeRaw(float magnitude)
+        {
+            string prefix = magnitude >= 0 ? "+" : string.Empty;
+            return $"{prefix}{magnitude:0.##}";
+        }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private void LogAffixDebug(ItemInstance instance)
+        {
+            if (instance == null)
+                return;
+
+            int count = instance.affixes?.Count ?? 0;
+            Debug.Log($"[ItemDetailsPanelUI] ItemInstance {instance.itemDefId} affixes={count}");
+
+            if (instance.affixes == null)
+                return;
+
+            for (int i = 0; i < instance.affixes.Count; i++)
+            {
+                var affix = instance.affixes[i];
+                Debug.Log($"[ItemDetailsPanelUI]  - {affix.id} ({affix.magnitude})");
+            }
+        }
+#endif
 
         // --------------------------------------------------------------------
         // Optional panel invocation (reflection)
