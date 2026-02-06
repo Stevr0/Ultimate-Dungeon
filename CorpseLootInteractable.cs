@@ -26,6 +26,8 @@
 // ============================================================================
 
 using System;
+using System.Collections.Generic;
+using UltimateDungeon.Progression;
 using UltimateDungeon.Items;
 using Unity.Netcode;
 using UnityEngine;
@@ -48,7 +50,13 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
     [SerializeField] private ItemInstanceFactory itemInstanceFactory;
 
     [Header("Loot (DEBUG / SPIKE)")]
-    [Tooltip("ItemDefId to seed into the corpse when spawned (v0.1 hardcoded)")]
+    [SerializeField] private int minDrops = 1;
+    [SerializeField] private int maxDrops = 3;
+
+    [Tooltip("ItemDefIds to randomly pick from. Populate this list on the corpse prefab (e.g. 10–30 entries).")]
+    [SerializeField] private List<string> lootPoolItemDefIds = new List<string>();
+
+    [Tooltip("ItemDefId to seed into the corpse when spawned (fallback when loot pool is empty).")]
     [SerializeField] private string debugItemDefId = "mainhand_sword_shortsword";
 
     // Runtime-only inventory for the corpse
@@ -73,8 +81,8 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         if (!IsServer)
             return;
 
-        // Create a tiny inventory (1 slot is enough for the spike)
-        _inventory = new InventoryRuntimeModel(slotCount: 1);
+        int slotCount = Mathf.Max(1, maxDrops);
+        _inventory = new InventoryRuntimeModel(slotCount);
 
         // Validate we can resolve ItemDefs (required for stacking rules, etc.)
         if (itemDefCatalog == null)
@@ -89,15 +97,43 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
             return;
         }
 
-        // Seed a single debug item (this proves loot transfer end-to-end)
-        if (!string.IsNullOrWhiteSpace(debugItemDefId))
+        uint baseSeed = (uint)(NetworkObject.NetworkObjectId * 2654435761u) ^ 0xC0FFEEu;
+        var rng = new DeterministicRng(unchecked((int)baseSeed));
+
+        int clampedMin = Mathf.Max(0, minDrops);
+        int clampedMax = Mathf.Max(clampedMin, maxDrops);
+        int dropCount = RangeInclusive(rng, clampedMin, clampedMax);
+        dropCount = Mathf.Clamp(dropCount, 0, clampedMax);
+
+        List<string> selectedItemDefIds = new List<string>(dropCount);
+        if (lootPoolItemDefIds != null && lootPoolItemDefIds.Count > 0)
         {
-            uint seed = BuildLootSeed(NetworkObjectId, debugItemDefId);
-            if (itemInstanceFactory.TryCreateLootItem(debugItemDefId, seed, out var item))
+            SelectLootFromPool(rng, lootPoolItemDefIds, dropCount, selectedItemDefIds);
+        }
+        else if (!string.IsNullOrWhiteSpace(debugItemDefId))
+        {
+            selectedItemDefIds.Add(debugItemDefId);
+        }
+        else
+        {
+            Debug.LogWarning("[CorpseLootInteractable] Loot pool is empty and no debug item is configured; corpse will spawn empty.");
+        }
+
+        for (int i = 0; i < selectedItemDefIds.Count; i++)
+        {
+            string itemDefId = selectedItemDefIds[i];
+            uint itemSeed = baseSeed + (uint)i * 1013904223u;
+            if (itemInstanceFactory.TryCreateLootItem(itemDefId, itemSeed, out var item))
             {
                 var addResult = _inventory.TryAdd(item, itemDefCatalog, out _);
                 if (addResult != InventoryOpResult.Success)
-                    Debug.LogWarning($"[CorpseLootInteractable] Failed to seed loot '{debugItemDefId}': {addResult}");
+                {
+                    Debug.LogWarning($"[CorpseLootInteractable] Failed to seed loot '{itemDefId}': {addResult}");
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"[CorpseLootInteractable] Failed to create loot item '{itemDefId}'.");
             }
         }
     }
@@ -160,30 +196,45 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
             NetworkObject.Despawn(destroy: true);
     }
 
-    private static uint BuildLootSeed(ulong networkObjectId, string itemDefId)
+    private static int RangeInclusive(DeterministicRng rng, int min, int max)
     {
-        const uint salt = 0x9E3779B9u;
-        uint hash = StableStringHash(itemDefId);
-        uint seed = (uint)networkObjectId;
-        seed ^= hash;
-        seed = (seed * 16777619u) ^ salt;
-        return seed;
+        if (max <= min)
+            return min;
+
+        return rng.NextInt(min, max + 1);
     }
 
-    private static uint StableStringHash(string value)
+    private static void SelectLootFromPool(
+        DeterministicRng rng,
+        List<string> pool,
+        int dropCount,
+        List<string> results)
     {
-        if (string.IsNullOrEmpty(value))
-            return 0u;
+        if (dropCount <= 0)
+            return;
 
-        unchecked
+        int poolCount = pool.Count;
+        if (poolCount >= dropCount)
         {
-            uint hash = 2166136261u;
-            for (int i = 0; i < value.Length; i++)
+            var indices = new List<int>(poolCount);
+            for (int i = 0; i < poolCount; i++)
+                indices.Add(i);
+
+            for (int i = 0; i < dropCount; i++)
             {
-                hash ^= value[i];
-                hash *= 16777619u;
+                int pickIndex = rng.NextInt(0, indices.Count);
+                int poolIndex = indices[pickIndex];
+                indices.RemoveAt(pickIndex);
+                results.Add(pool[poolIndex]);
             }
-            return hash;
+        }
+        else
+        {
+            for (int i = 0; i < dropCount; i++)
+            {
+                int poolIndex = rng.NextInt(0, poolCount);
+                results.Add(pool[poolIndex]);
+            }
         }
     }
 
