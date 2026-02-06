@@ -82,9 +82,9 @@ All derived values must be computable from:
 - **Absolute Max Cap per Vital: 150**
 
 ### Derivation Rules (LOCKED)
-- **Max HP = STR**, up to 150
-- **Max Stamina = DEX**, up to 150
-- **Max Mana = INT**, up to 150
+- **Max HP = STR** *2
+- **Max Stamina = DEX** *2
+- **Max Mana = INT** *2
 
 > Any value beyond the attribute-derived amount must come from:
 > - Item bonuses (e.g., `Vital_MaxHP` affix)
