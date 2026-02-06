@@ -220,6 +220,9 @@ The player sees two values:
 
 ## ITEM INSURANCE (LOCKED RULES)
 
+**Policy only.** This section specifies the design rules and does **not** imply
+that insurance mechanics are implemented in code yet.
+
 Insurance is **per-item** and optional.
 
 ### Runtime Fields Needed (on ItemInstance)
@@ -259,4 +262,3 @@ Any change must:
 - Increment Version
 - Update Last Updated
 - Call out dependent impacts (aggregation, UI, save migration)
-
