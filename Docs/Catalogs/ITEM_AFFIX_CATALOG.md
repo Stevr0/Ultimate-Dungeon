@@ -145,7 +145,26 @@ Define:
 | 80–99.9 | 40% |
 | 100.0 | 50% |
 
+### D) Enhancement (Crafting) — Destroy Item Chance
 
+**Rule (LOCKED):** Enhancement affix destroy item chance is determined by the player’s relevant skill when an attempt fails.
+**Rule (LOCKED):** A failed attempt depletes resources.
+**Rule (LOCKED):** A failed attempt has a chance to destroy the item.
+
+Define:
+- `skill` = player’s crafting skill value (0–100)
+- `Nmax(skill)` = Chance to destroy item on failed Enhancement.
+
+**Nmax(skill) (LOCKED):**
+
+| Skill Range | Nmax |
+|---:|---:|
+| 0–19.9 | 90% |
+| 20–39.9 | 80% |
+| 40–59.9 | 70% |
+| 60–79.9 | 60% |
+| 80–99.9 | 50% |
+| 100.0 | 40% |
 ---
 
 ## HIT SPELLS & HIT LEACHES (WEAPON-ONLY)
@@ -185,10 +204,10 @@ They do **not** require mana, reagents, cast time, targeting validation, or line
 | AffixId | Display Name | Type | Range | Stacking | Eligible | Notes |
 |---|---|---|---|---|---|---|
 | Resist_Physical | Physical Resist | Flat | 0..15 | Sum | Armor/Shield | Capped by Player resist cap |
-| Resist_Fire | Fire Resist | Flat | 0..15 | Sum | Armor/Shield |  |
-| Resist_Cold | Cold Resist | Flat | 0..15 | Sum | Armor/Shield |  |
-| Resist_Poison | Poison Resist | Flat | 0..15 | Sum | Armor/Shield |  |
-| Resist_Energy | Energy Resist | Flat | 0..15 | Sum | Armor/Shield |  |
+| Resist_Fire | Fire Resist | Flat | 0..15 | Sum | Armor/Shield | Capped by Player resist cap |
+| Resist_Cold | Cold Resist | Flat | 0..15 | Sum | Armor/Shield | Capped by Player resist cap |
+| Resist_Poison | Poison Resist | Flat | 0..15 | Sum | Armor/Shield | Capped by Player resist cap |
+| Resist_Energy | Energy Resist | Flat | 0..15 | Sum | Armor/Shield | Capped by Player resist cap |
 
 ---
 
@@ -201,13 +220,33 @@ They do **not** require mana, reagents, cast time, targeting validation, or line
 
 ---
 
+## STAT MODIFIERS
+
+| AffixId | Display Name | Type | Range | Stacking | Eligible | Notes |
+|---|---|---|---|---|---|---|
+| Stat_MaxStrength | Increase Max Strength | Flat | 0..25 | Sum | Armor/Shield/Jewelry | Final caps owned by `PLAYER_DEFINITION.md` |
+| Stat_MaxDexterity | Increase Max Dexterity | Flat | 0..25 | Sum | Armor/Shield/Jewelry |  Final caps owned by `PLAYER_DEFINITION.md` |
+| Stat_MaxInteligence | Increase Max Inteligence | Flat | 0..25 | Sum | Armor/Shield/Jewelry | Final caps owned by `PLAYER_DEFINITION.md`  |
+
+---
+
 ## VITAL MODIFIERS
 
 | AffixId | Display Name | Type | Range | Stacking | Eligible | Notes |
 |---|---|---|---|---|---|---|
-| Vital_MaxHP | Increase Max HP | Flat | 0..25 | Sum | Any | Final caps owned by `PLAYER_DEFINITION.md` |
-| Vital_MaxStamina | Increase Max Stamina | Flat | 0..25 | Sum | Any |  |
-| Vital_MaxMana | Increase Max Mana | Flat | 0..25 | Sum | Any |  |
+| Vital_MaxHealth | Increase Max Health | Flat | 0..25 | Sum | Any | Final caps owned by `PLAYER_DEFINITION.md` |
+| Vital_MaxStamina | Increase Max Stamina | Flat | 0..25 | Sum | Any | Final caps owned by `PLAYER_DEFINITION.md`  |
+| Vital_MaxMana | Increase Max Mana | Flat | 0..25 | Sum | Any | Final caps owned by `PLAYER_DEFINITION.md`  |
+
+---
+
+## REGENERATION MODIFIERS
+
+| AffixId | Display Name | Type | Range | Stacking | Eligible | Notes |
+|---|---|---|---|---|---|---|
+| Regenerate_Health | Regenerate Health | Percent| 0..5 | Sum | armor/shield/jewelry | Final caps owned by `PLAYER_DEFINITION.md` |
+| Regenerate_Stamina | Regenerate Stamina | Percent | 0..5 | Sum | armor/shield/jewelry | Final caps owned by `PLAYER_DEFINITION.md`  |
+| Regenerate_Mana | Regenerate Mana | Percent | 0..5 | Sum | armor/shield/jewelry | Final caps owned by `PLAYER_DEFINITION.md`  |
 
 ---
 
@@ -233,11 +272,22 @@ They do **not** require mana, reagents, cast time, targeting validation, or line
 
 ---
 
+## MOVE - SPEED MODIFIERS
+
+| AffixId | Display Name | Type | Range | Stacking | Eligible | Notes |
+|---|---|---|---|---|---|---|
+| Move_Speed | Move Speed Increase | Flat | 0..5 | NoStack | Weapon | Restores HP based on final damage |
+
+
+---
+
 ## ELIGIBILITY RULES (LOCKED)
 
 - Hit Spells and Leaches are **weapon-only**.
 - Faster Casting is **jewelry-only** (v1).
-- Resist affixes are **armor/shield-only** (v1).
+- Resist affixes are **armor/shield/jewelry-only** (v1).
+- Regenerate affixes are **armor/shield/jewelry-only** (v1).
+- Stat affixes are **armor/jewelry-only** (v1).
 
 > If eligibility expands later, update this doc and append new affixes; do not silently change meaning.
 
