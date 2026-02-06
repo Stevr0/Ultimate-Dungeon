@@ -234,8 +234,10 @@ Rules (LOCKED):
 - Jewelry uses durability (`usesDurability = true`).
 
 ### ConsumableData (required for `family == UtilityItem` or `family == Consumable`)
-- `ConsumableType type` *(Potion/Food/Bandage/Torch/etc.)*
+- `ConsumableType type` *(Potion/Food/Bandage/Torch/Scroll/Rune)*
 - `bool isUsable`
+- `int charges`
+- `bool isConsumed`
 - `float useTimeSeconds`
 
 Belt rules (LOCKED):
