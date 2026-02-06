@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // PlayerDefinition.cs
 // ----------------------------------------------------------------------------
 // Authoritative player template (ScriptableObject).
@@ -98,6 +98,9 @@ namespace UltimateDungeon.Players
         [Tooltip("Hard cap for any max vital (HP/Stamina/Mana). Locked to 150.")]
         public int vitalCap = 150;
 
+        [Tooltip("Hard cap for any (Resistances). Locked to 70.")]
+        public int resistanceCap = 70;
+
         // --------------------------------------------------------------------
         // Vital Derivation (LOCKED RULE)
         // --------------------------------------------------------------------
@@ -155,6 +158,10 @@ namespace UltimateDungeon.Players
             // Keep vitalCap at exactly 150.
             if (vitalCap != 150)
                 vitalCap = 150;
+
+            // Keep resistanceCap at exactly 70.
+            if (resistanceCap != 70)
+                resistanceCap = 70;
 
             // Ensure starting attributes are fixed to 10 each.
             // If you later add character creation point-buy, remove these clamps.
