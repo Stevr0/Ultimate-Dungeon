@@ -21,7 +21,7 @@ namespace UltimateDungeon.Items
     public enum AffixId
     {
         // --------------------------------------------------------------------
-        // COMBAT — CHANCE & DAMAGE
+        // COMBAT â€” CHANCE & DAMAGE
         // --------------------------------------------------------------------
         Combat_HitChance = 0,
         Combat_DefenseChance = 1,
@@ -38,7 +38,7 @@ namespace UltimateDungeon.Items
         Resist_Energy = 8,
 
         // --------------------------------------------------------------------
-        // MAGIC — CASTING MODIFIERS
+        // MAGIC â€” CASTING MODIFIERS
         // --------------------------------------------------------------------
         Magic_FasterCasting = 9,
 
@@ -50,18 +50,38 @@ namespace UltimateDungeon.Items
         Vital_MaxMana = 12,
 
         // --------------------------------------------------------------------
-        // WEAPON PROCS — HIT SPELLS
+        // WEAPON PROCS â€” HIT SPELLS
         // --------------------------------------------------------------------
         Hit_Lightning = 13,
         Hit_Fireball = 14,
         Hit_Harm = 15,
 
         // --------------------------------------------------------------------
-        // WEAPON PROCS — HIT LEACHES
+        // WEAPON PROCS â€” HIT LEACHES
         // --------------------------------------------------------------------
         Leech_Life = 16,
         Leech_Mana = 17,
         Leech_Stamina = 18,
+
+        // --------------------------------------------------------------------
+        // STAT MODIFIERS
+        // --------------------------------------------------------------------
+        Stat_MaxStrength = 19,
+        Stat_MaxDexterity = 20,
+        Stat_MaxInteligence = 21,
+
+        // --------------------------------------------------------------------
+        // REGENERATION MODIFIERS
+        // --------------------------------------------------------------------
+        Regenerate_Health = 22,
+        Regenerate_Stamina = 23,
+        Regenerate_Mana = 24,
+
+        // --------------------------------------------------------------------
+        // MOVE - SPEED MODIFIERS
+        // --------------------------------------------------------------------
+        Move_Speed = 25,
+
 
         // --------------------------------------------------------------------
         // APPEND NEW AFFIX IDS BELOW THIS LINE ONLY.
