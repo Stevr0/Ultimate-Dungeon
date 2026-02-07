@@ -264,9 +264,11 @@ namespace UltimateDungeon.Players.Networking
             _itemBonusStaminaRegen = 0f;
             _itemBonusManaRegen = 0f;
 
+            var equippedCount = 0;
             if (equipment != null)
             {
                 var instances = equipment.ServerGetEquippedInstancesSnapshot();
+                equippedCount = instances.Count;
                 for (int i = 0; i < instances.Count; i++)
                 {
                     var instance = instances[i];
@@ -328,6 +330,10 @@ namespace UltimateDungeon.Players.Networking
             float hpRegen = Mathf.Max(0f, baseHpRegen + _itemBonusHpRegen);
             float staminaRegen = Mathf.Max(0f, baseStaminaRegen + _itemBonusStaminaRegen);
             float manaRegen = Mathf.Max(0f, baseManaRegen + _itemBonusManaRegen);
+
+            Debug.Log($"[PlayerStatsNet] Equipped instances read={equippedCount} " +
+                      $"STR={effectiveStr} INT={effectiveInt} " +
+                      $"Regen={hpRegen:0.##}/{staminaRegen:0.##}/{manaRegen:0.##}");
 
             if (enableDebugLogs)
             {
