@@ -11,6 +11,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
@@ -246,6 +247,22 @@ namespace UltimateDungeon.Items
             BuildEquippedSnapshot(removed, def, out var activeSlot, out var primarySpell, out var secondarySpell, out var utilitySpell);
             _equippedInstances[uiSlot] = removed;
             SetEquipped(uiSlot, removed.itemDefId, removed.stackCount, (byte)activeSlot, (int)primarySpell, (int)secondarySpell, (int)utilitySpell);
+
+            var equippedSummary = new StringBuilder();
+            equippedSummary.Append($"[PlayerEquipmentComponent] Equipped instances count={_equippedInstances.Count} ");
+            foreach (var entry in _equippedInstances)
+            {
+                var instance = entry.Value;
+                if (instance == null)
+                {
+                    equippedSummary.Append($"[{entry.Key}:null] ");
+                    continue;
+                }
+
+                var affixCount = instance.affixes != null ? instance.affixes.Count : 0;
+                equippedSummary.Append($"[{entry.Key}:{instance.itemDefId} affixes={affixCount}] ");
+            }
+            Debug.Log(equippedSummary.ToString());
 
             if (enableDebugLogs)
                 Debug.Log($"[PlayerEquipmentComponent] Equipped {removed.itemDefId} into {uiSlot}.");
