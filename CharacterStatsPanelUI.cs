@@ -38,6 +38,9 @@ namespace UltimateDungeon.UI.Panels
         [SerializeField] private TextMeshProUGUI actionGatesText;
         [SerializeField] private TextMeshProUGUI debugFooterText;
 
+        [Header("Debug")]
+        [SerializeField] private bool enableDebugLogs;
+
         private UltimateDungeon.Players.Networking.PlayerStatsNet _statsNet;
         private UltimateDungeon.Players.Networking.PlayerCombatStatsNet _combatStatsNet;
         private UltimateDungeon.Combat.ActorVitals _vitals;
@@ -91,6 +94,12 @@ namespace UltimateDungeon.UI.Panels
                 _statsNet.BaseSTR.OnValueChanged += OnStatChanged;
                 _statsNet.BaseDEX.OnValueChanged += OnStatChanged;
                 _statsNet.BaseINT.OnValueChanged += OnStatChanged;
+                _statsNet.MaxHP.OnValueChanged += OnStatChanged;
+                _statsNet.MaxStamina.OnValueChanged += OnStatChanged;
+                _statsNet.MaxMana.OnValueChanged += OnStatChanged;
+                _statsNet.HpRegenPerSec.OnValueChanged += OnRegenChanged;
+                _statsNet.StaminaRegenPerSec.OnValueChanged += OnRegenChanged;
+                _statsNet.ManaRegenPerSec.OnValueChanged += OnRegenChanged;
             }
 
             if (_combatStatsNet != null)
@@ -146,6 +155,12 @@ namespace UltimateDungeon.UI.Panels
                 _statsNet.BaseSTR.OnValueChanged -= OnStatChanged;
                 _statsNet.BaseDEX.OnValueChanged -= OnStatChanged;
                 _statsNet.BaseINT.OnValueChanged -= OnStatChanged;
+                _statsNet.MaxHP.OnValueChanged -= OnStatChanged;
+                _statsNet.MaxStamina.OnValueChanged -= OnStatChanged;
+                _statsNet.MaxMana.OnValueChanged -= OnStatChanged;
+                _statsNet.HpRegenPerSec.OnValueChanged -= OnRegenChanged;
+                _statsNet.StaminaRegenPerSec.OnValueChanged -= OnRegenChanged;
+                _statsNet.ManaRegenPerSec.OnValueChanged -= OnRegenChanged;
             }
 
             if (_combatStatsNet != null)
@@ -191,7 +206,21 @@ namespace UltimateDungeon.UI.Panels
                 _currencyWallet.CurrencyChanged -= OnCurrencyChanged;
         }
 
-        private void OnStatChanged(int previous, int current) => Refresh();
+        private void OnStatChanged(int previous, int current)
+        {
+            if (enableDebugLogs)
+                Debug.Log($"[CharacterStatsPanelUI] Stat changed: {previous} -> {current}");
+
+            Refresh();
+        }
+
+        private void OnRegenChanged(float previous, float current)
+        {
+            if (enableDebugLogs)
+                Debug.Log($"[CharacterStatsPanelUI] Regen changed: {previous:0.##} -> {current:0.##}");
+
+            Refresh();
+        }
         private void OnCombatIntChanged(int previous, int current) => Refresh();
         private void OnCombatFloatChanged(float previous, float current) => Refresh();
         private void OnCombatBoolChanged(bool previous, bool current) => Refresh();
@@ -206,6 +235,8 @@ namespace UltimateDungeon.UI.Panels
             if (listContent != null && rowPrefab != null)
             {
                 RefreshSingleList();
+                if (enableDebugLogs)
+                    Debug.Log("[CharacterStatsPanelUI] Refreshed after stats change.");
                 return;
             }
 
@@ -224,14 +255,18 @@ namespace UltimateDungeon.UI.Panels
             AddRow(BuildAttributeLine("Intelligence", _statsNet != null ? _statsNet.BaseINT.Value : (int?)null, _statsNet != null ? _statsNet.INT.Value : (int?)null));
 
             AddHeader("Vitals");
-            AddRow(BuildVitalLine("Health", _vitals != null ? _vitals.CurrentHPNet.Value : (int?)null, _vitals != null ? _vitals.MaxHPNet.Value : (int?)null));
-            AddRow(BuildVitalLine("Stamina", _vitals != null ? _vitals.CurrentStaminaNet.Value : (int?)null, _vitals != null ? _vitals.MaxStaminaNet.Value : (int?)null));
-            AddRow(BuildVitalLine("Mana", _vitals != null ? _vitals.CurrentManaNet.Value : (int?)null, _vitals != null ? _vitals.MaxManaNet.Value : (int?)null));
+            int? maxHp = _statsNet != null ? _statsNet.MaxHP.Value : (_vitals != null ? _vitals.MaxHPNet.Value : (int?)null);
+            int? maxStamina = _statsNet != null ? _statsNet.MaxStamina.Value : (_vitals != null ? _vitals.MaxStaminaNet.Value : (int?)null);
+            int? maxMana = _statsNet != null ? _statsNet.MaxMana.Value : (_vitals != null ? _vitals.MaxManaNet.Value : (int?)null);
+
+            AddRow(BuildVitalLine("Health", _vitals != null ? _vitals.CurrentHPNet.Value : (int?)null, maxHp));
+            AddRow(BuildVitalLine("Stamina", _vitals != null ? _vitals.CurrentStaminaNet.Value : (int?)null, maxStamina));
+            AddRow(BuildVitalLine("Mana", _vitals != null ? _vitals.CurrentManaNet.Value : (int?)null, maxMana));
 
             AddHeader("Regeneration");
-            AddRow(BuildRegenLine("Health", definition != null ? definition.hpRegenPerSec : (float?)null));
-            AddRow(BuildRegenLine("Stamina", definition != null ? definition.staminaRegenPerSec : (float?)null));
-            AddRow(BuildRegenLine("Mana", definition != null ? definition.manaRegenPerSec : (float?)null));
+            AddRow(BuildRegenLine("Health", _statsNet != null ? _statsNet.HpRegenPerSec.Value : (float?)null));
+            AddRow(BuildRegenLine("Stamina", _statsNet != null ? _statsNet.StaminaRegenPerSec.Value : (float?)null));
+            AddRow(BuildRegenLine("Mana", _statsNet != null ? _statsNet.ManaRegenPerSec.Value : (float?)null));
 
             AddHeader("Resistances");
             int? resistCap = definition != null ? definition.resistanceCap : (int?)null;

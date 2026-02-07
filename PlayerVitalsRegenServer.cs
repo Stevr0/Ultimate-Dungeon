@@ -31,6 +31,11 @@ namespace UltimateDungeon.Players
         private float _staAcc;
         private float _manaAcc;
 
+        private bool _hasRegenOverride;
+        private float _overrideHpRegenPerSec;
+        private float _overrideStaminaRegenPerSec;
+        private float _overrideManaRegenPerSec;
+
         private void Awake()
         {
             if (vitals == null)
@@ -50,6 +55,20 @@ namespace UltimateDungeon.Players
         public void SetServerTickEnabled(bool enabled)
         {
             serverTickEnabled = enabled;
+        }
+
+        /// <summary>
+        /// Server-only: override regen rates (used for equipment/status-derived bonuses).
+        /// </summary>
+        public void SetRegenRatesServer(float hpPerSec, float staminaPerSec, float manaPerSec)
+        {
+            if (NetworkManager.Singleton != null && !NetworkManager.Singleton.IsServer)
+                return;
+
+            _hasRegenOverride = true;
+            _overrideHpRegenPerSec = hpPerSec;
+            _overrideStaminaRegenPerSec = staminaPerSec;
+            _overrideManaRegenPerSec = manaPerSec;
         }
 
         private void Update()
@@ -72,9 +91,13 @@ namespace UltimateDungeon.Players
             if (dt <= 0f)
                 return;
 
-            float hpPerSec = Mathf.Max(0f, definition.hpRegenPerSec);
-            float staminaPerSec = Mathf.Max(0f, definition.staminaRegenPerSec);
-            float manaPerSec = Mathf.Max(0f, definition.manaRegenPerSec);
+            float hpPerSec = _hasRegenOverride ? _overrideHpRegenPerSec : definition.hpRegenPerSec;
+            float staminaPerSec = _hasRegenOverride ? _overrideStaminaRegenPerSec : definition.staminaRegenPerSec;
+            float manaPerSec = _hasRegenOverride ? _overrideManaRegenPerSec : definition.manaRegenPerSec;
+
+            hpPerSec = Mathf.Max(0f, hpPerSec);
+            staminaPerSec = Mathf.Max(0f, staminaPerSec);
+            manaPerSec = Mathf.Max(0f, manaPerSec);
 
             _hpAcc += hpPerSec * dt;
             _staAcc += staminaPerSec * dt;
