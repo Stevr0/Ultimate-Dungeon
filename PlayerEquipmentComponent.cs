@@ -30,6 +30,9 @@ namespace UltimateDungeon.Items
         [Header("Required")]
         [SerializeField] private PlayerInventoryComponent playerInventory;
 
+        [Header("Debug")]
+        [SerializeField] private bool enableDebugLogs;
+
         public NetworkList<EquippedSlotNet> EquippedNet { get; private set; }
 
         // Server-only: keep full ItemInstance data for equipped items.
@@ -232,6 +235,9 @@ namespace UltimateDungeon.Items
             BuildEquippedSnapshot(removed, def, out var activeSlot, out var primarySpell, out var secondarySpell, out var utilitySpell);
             SetEquipped(uiSlot, removed.itemDefId, removed.stackCount, (byte)activeSlot, (int)primarySpell, (int)secondarySpell, (int)utilitySpell);
             _equippedInstances[uiSlot] = removed;
+
+            if (enableDebugLogs)
+                Debug.Log($"[PlayerEquipmentComponent] Equipped {removed.itemDefId} into {uiSlot}.");
         }
 
         [ServerRpc]
@@ -269,6 +275,9 @@ namespace UltimateDungeon.Items
             // Clear equipped slot.
             SetEquipped(uiSlot, string.Empty, 0, (byte)AbilityGrantSlot.Primary, (int)SpellId.None, (int)SpellId.None, (int)SpellId.None);
             _equippedInstances.Remove(uiSlot);
+
+            if (enableDebugLogs)
+                Debug.Log($"[PlayerEquipmentComponent] Unequipped {instance.itemDefId} from {uiSlot}.");
         }
 
         [ServerRpc]
