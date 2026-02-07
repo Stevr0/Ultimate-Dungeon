@@ -165,9 +165,6 @@ namespace UltimateDungeon.Players.Networking
 
         private const float FloatEpsilon = 0.0001f;
 
-        private bool _pendingDebugLog;
-        private string _pendingDebugReason;
-
         private void Reset()
         {
             if (stats == null)
@@ -199,7 +196,7 @@ namespace UltimateDungeon.Players.Networking
             if (IsServer)
             {
                 SubscribeToEquipment();
-                RecomputeAndReplicate(force: true, reason: "spawn");
+                ServerRecomputeEffectiveStats("spawn");
             }
         }
 
@@ -211,7 +208,11 @@ namespace UltimateDungeon.Players.Networking
             if (stats == null)
                 return;
 
-            PushSnapshot(force: false);
+            if (stats.BaseSTR != _lastBaseSTR || stats.BaseDEX != _lastBaseDEX || stats.BaseINT != _lastBaseINT ||
+                stats.STR != _lastSTR || stats.DEX != _lastDEX || stats.INT != _lastINT)
+            {
+                ServerRecomputeEffectiveStats("stats");
+            }
         }
 
         public override void OnNetworkDespawn()
@@ -237,87 +238,22 @@ namespace UltimateDungeon.Players.Networking
             if (!IsServer)
                 return;
 
-            RecomputeAndReplicate(force: true, reason: "equipment");
+            ServerRecomputeEffectiveStats("equipment");
         }
 
         /// <summary>
-        /// Server-side: snapshot stats into NetworkVariables.
-        /// Writes only on change unless forced.
+        /// Server-side: recompute effective stats from definition + equipment affixes.
         /// </summary>
-        private void PushSnapshot(bool force)
+        public void ServerRecomputeEffectiveStats(string reason = "manual")
         {
-            if (stats == null)
+            if (!IsServer)
                 return;
 
-            int baseStr = stats.BaseSTR;
-            int baseDex = stats.BaseDEX;
-            int baseInt = stats.BaseINT;
+            var definition = playerCore != null ? playerCore.definition : null;
+            int baseStr = stats != null ? stats.BaseSTR : (definition != null ? definition.baseSTR : 0);
+            int baseDex = stats != null ? stats.BaseDEX : (definition != null ? definition.baseDEX : 0);
+            int baseInt = stats != null ? stats.BaseINT : (definition != null ? definition.baseINT : 0);
 
-            int str = stats.STR;
-            int dex = stats.DEX;
-            int intel = stats.INT;
-
-            bool statsChanged = force;
-
-            if (!force)
-            {
-                if (baseStr == _lastBaseSTR && baseDex == _lastBaseDEX && baseInt == _lastBaseINT &&
-                    str == _lastSTR && dex == _lastDEX && intel == _lastINT)
-                {
-                    statsChanged = false;
-                }
-                else
-                {
-                    statsChanged = true;
-                }
-            }
-            else
-            {
-                statsChanged = true;
-            }
-
-            if (statsChanged)
-            {
-                _lastBaseSTR = baseStr;
-                _lastBaseDEX = baseDex;
-                _lastBaseINT = baseInt;
-
-                _lastSTR = str;
-                _lastDEX = dex;
-                _lastINT = intel;
-
-                BaseSTR.Value = baseStr;
-                BaseDEX.Value = baseDex;
-                BaseINT.Value = baseInt;
-
-                STR.Value = str;
-                DEX.Value = dex;
-                INT.Value = intel;
-            }
-
-            ApplyDerivedVitalsAndRegen(force || statsChanged);
-        }
-
-        /// <summary>
-        /// Server-side: recompute equipment-driven bonuses, update stats, vitals, and replication.
-        /// </summary>
-        private void RecomputeAndReplicate(bool force, string reason)
-        {
-            if (!IsServer || stats == null)
-                return;
-
-            RecomputeEquipmentBonuses();
-
-            stats.SetItemAttributeModifiers(_itemBonusStr, _itemBonusDex, _itemBonusInt);
-
-            _pendingDebugLog = enableDebugLogs;
-            _pendingDebugReason = reason;
-
-            PushSnapshot(force: force);
-        }
-
-        private void RecomputeEquipmentBonuses()
-        {
             _itemBonusStr = 0;
             _itemBonusDex = 0;
             _itemBonusInt = 0;
@@ -328,67 +264,62 @@ namespace UltimateDungeon.Players.Networking
             _itemBonusStaminaRegen = 0f;
             _itemBonusManaRegen = 0f;
 
-            if (equipment == null)
-                return;
-
-            foreach (UltimateDungeon.Items.EquipSlot slot in System.Enum.GetValues(typeof(UltimateDungeon.Items.EquipSlot)))
+            if (equipment != null)
             {
-                if (slot == UltimateDungeon.Items.EquipSlot.None)
-                    continue;
-
-                if (!equipment.TryGetEquippedItem(slot, out var instance, out _))
-                    continue;
-
-                if (instance?.affixes == null)
-                    continue;
-
-                foreach (var affix in instance.affixes)
+                var instances = equipment.ServerGetEquippedInstancesSnapshot();
+                for (int i = 0; i < instances.Count; i++)
                 {
-                    switch (affix.id)
+                    var instance = instances[i];
+                    if (instance?.affixes == null)
+                        continue;
+
+                    foreach (var affix in instance.affixes)
                     {
-                        case UltimateDungeon.Items.AffixId.Stat_MaxStrength:
-                            _itemBonusStr += Mathf.RoundToInt(affix.magnitude);
-                            break;
-                        case UltimateDungeon.Items.AffixId.Stat_MaxDexterity:
-                            _itemBonusDex += Mathf.RoundToInt(affix.magnitude);
-                            break;
-                        case UltimateDungeon.Items.AffixId.Stat_MaxInteligence:
-                            _itemBonusInt += Mathf.RoundToInt(affix.magnitude);
-                            break;
-                        case UltimateDungeon.Items.AffixId.Vital_MaxHP:
-                            _itemBonusMaxHp += Mathf.RoundToInt(affix.magnitude);
-                            break;
-                        case UltimateDungeon.Items.AffixId.Vital_MaxStamina:
-                            _itemBonusMaxStamina += Mathf.RoundToInt(affix.magnitude);
-                            break;
-                        case UltimateDungeon.Items.AffixId.Vital_MaxMana:
-                            _itemBonusMaxMana += Mathf.RoundToInt(affix.magnitude);
-                            break;
-                        case UltimateDungeon.Items.AffixId.Regenerate_Health:
-                            _itemBonusHpRegen += affix.magnitude;
-                            break;
-                        case UltimateDungeon.Items.AffixId.Regenerate_Stamina:
-                            _itemBonusStaminaRegen += affix.magnitude;
-                            break;
-                        case UltimateDungeon.Items.AffixId.Regenerate_Mana:
-                            _itemBonusManaRegen += affix.magnitude;
-                            break;
+                        switch (affix.id)
+                        {
+                            case UltimateDungeon.Items.AffixId.Stat_MaxStrength:
+                                _itemBonusStr += Mathf.RoundToInt(affix.magnitude);
+                                break;
+                            case UltimateDungeon.Items.AffixId.Stat_MaxDexterity:
+                                _itemBonusDex += Mathf.RoundToInt(affix.magnitude);
+                                break;
+                            case UltimateDungeon.Items.AffixId.Stat_MaxInteligence:
+                                _itemBonusInt += Mathf.RoundToInt(affix.magnitude);
+                                break;
+                            case UltimateDungeon.Items.AffixId.Vital_MaxHP:
+                                _itemBonusMaxHp += Mathf.RoundToInt(affix.magnitude);
+                                break;
+                            case UltimateDungeon.Items.AffixId.Vital_MaxStamina:
+                                _itemBonusMaxStamina += Mathf.RoundToInt(affix.magnitude);
+                                break;
+                            case UltimateDungeon.Items.AffixId.Vital_MaxMana:
+                                _itemBonusMaxMana += Mathf.RoundToInt(affix.magnitude);
+                                break;
+                            case UltimateDungeon.Items.AffixId.Regenerate_Health:
+                                _itemBonusHpRegen += affix.magnitude;
+                                break;
+                            case UltimateDungeon.Items.AffixId.Regenerate_Stamina:
+                                _itemBonusStaminaRegen += affix.magnitude;
+                                break;
+                            case UltimateDungeon.Items.AffixId.Regenerate_Mana:
+                                _itemBonusManaRegen += affix.magnitude;
+                                break;
+                        }
                     }
                 }
             }
-        }
 
-        private void ApplyDerivedVitalsAndRegen(bool force)
-        {
-            if (!IsServer || stats == null)
-                return;
+            if (stats != null)
+                stats.SetItemAttributeModifiers(_itemBonusStr, _itemBonusDex, _itemBonusInt);
 
-            var definition = playerCore != null ? playerCore.definition : null;
+            int effectiveStr = stats != null ? stats.STR : baseStr + _itemBonusStr;
+            int effectiveDex = stats != null ? stats.DEX : baseDex + _itemBonusDex;
+            int effectiveInt = stats != null ? stats.INT : baseInt + _itemBonusInt;
+
             int cap = definition != null ? Mathf.Max(1, definition.vitalCap) : 150;
-
-            int maxHp = Mathf.Clamp(stats.STR + _itemBonusMaxHp, 1, cap);
-            int maxStamina = Mathf.Clamp(stats.DEX + _itemBonusMaxStamina, 0, cap);
-            int maxMana = Mathf.Clamp(stats.INT + _itemBonusMaxMana, 0, cap);
+            int maxHp = Mathf.Clamp(effectiveStr + _itemBonusMaxHp, 1, cap);
+            int maxStamina = Mathf.Clamp(effectiveDex + _itemBonusMaxStamina, 0, cap);
+            int maxMana = Mathf.Clamp(effectiveInt + _itemBonusMaxMana, 0, cap);
 
             float baseHpRegen = definition != null ? definition.hpRegenPerSec : 0f;
             float baseStaminaRegen = definition != null ? definition.staminaRegenPerSec : 0f;
@@ -398,23 +329,29 @@ namespace UltimateDungeon.Players.Networking
             float staminaRegen = Mathf.Max(0f, baseStaminaRegen + _itemBonusStaminaRegen);
             float manaRegen = Mathf.Max(0f, baseManaRegen + _itemBonusManaRegen);
 
-            if (_pendingDebugLog)
+            if (enableDebugLogs)
             {
-                Debug.Log($"[PlayerStatsNet] Recompute ({_pendingDebugReason}) " +
-                          $"STR={stats.STR} DEX={stats.DEX} INT={stats.INT} " +
+                Debug.Log($"[PlayerStatsNet] Recompute ({reason}) " +
+                          $"STR={effectiveStr} DEX={effectiveDex} INT={effectiveInt} " +
                           $"MaxHP={maxHp} MaxStam={maxStamina} MaxMana={maxMana} " +
                           $"Regen={hpRegen:0.##}/{staminaRegen:0.##}/{manaRegen:0.##}");
-                _pendingDebugLog = false;
-                _pendingDebugReason = null;
             }
 
-            SetIfChanged(ref _lastMaxHp, maxHp, MaxHP, force);
-            SetIfChanged(ref _lastMaxStamina, maxStamina, MaxStamina, force);
-            SetIfChanged(ref _lastMaxMana, maxMana, MaxMana, force);
+            SetIfChanged(ref _lastBaseSTR, baseStr, BaseSTR, force: false);
+            SetIfChanged(ref _lastBaseDEX, baseDex, BaseDEX, force: false);
+            SetIfChanged(ref _lastBaseINT, baseInt, BaseINT, force: false);
 
-            SetIfChanged(ref _lastHpRegenPerSec, hpRegen, HpRegenPerSec, force);
-            SetIfChanged(ref _lastStaminaRegenPerSec, staminaRegen, StaminaRegenPerSec, force);
-            SetIfChanged(ref _lastManaRegenPerSec, manaRegen, ManaRegenPerSec, force);
+            SetIfChanged(ref _lastSTR, effectiveStr, STR, force: false);
+            SetIfChanged(ref _lastDEX, effectiveDex, DEX, force: false);
+            SetIfChanged(ref _lastINT, effectiveInt, INT, force: false);
+
+            SetIfChanged(ref _lastMaxHp, maxHp, MaxHP, force: false);
+            SetIfChanged(ref _lastMaxStamina, maxStamina, MaxStamina, force: false);
+            SetIfChanged(ref _lastMaxMana, maxMana, MaxMana, force: false);
+
+            SetIfChanged(ref _lastHpRegenPerSec, hpRegen, HpRegenPerSec, force: false);
+            SetIfChanged(ref _lastStaminaRegenPerSec, staminaRegen, StaminaRegenPerSec, force: false);
+            SetIfChanged(ref _lastManaRegenPerSec, manaRegen, ManaRegenPerSec, force: false);
 
             if (vitals != null)
             {

@@ -92,6 +92,17 @@ namespace UltimateDungeon.Items
         // Server helpers (authoritative lookups)
         // --------------------------------------------------------------------
 
+        public IReadOnlyList<ItemInstance> ServerGetEquippedInstancesSnapshot()
+        {
+            if (!IsServer)
+                return Array.Empty<ItemInstance>();
+
+            if (_equippedInstances.Count == 0)
+                return Array.Empty<ItemInstance>();
+
+            return new List<ItemInstance>(_equippedInstances.Values);
+        }
+
         public bool TryGetEquippedItem(EquipSlot equipSlot, out ItemInstance instance, out ItemDef def)
         {
             instance = null;
@@ -233,8 +244,8 @@ namespace UltimateDungeon.Items
 
             // Equip.
             BuildEquippedSnapshot(removed, def, out var activeSlot, out var primarySpell, out var secondarySpell, out var utilitySpell);
-            SetEquipped(uiSlot, removed.itemDefId, removed.stackCount, (byte)activeSlot, (int)primarySpell, (int)secondarySpell, (int)utilitySpell);
             _equippedInstances[uiSlot] = removed;
+            SetEquipped(uiSlot, removed.itemDefId, removed.stackCount, (byte)activeSlot, (int)primarySpell, (int)secondarySpell, (int)utilitySpell);
 
             if (enableDebugLogs)
                 Debug.Log($"[PlayerEquipmentComponent] Equipped {removed.itemDefId} into {uiSlot}.");
@@ -273,8 +284,8 @@ namespace UltimateDungeon.Items
                 return;
 
             // Clear equipped slot.
-            SetEquipped(uiSlot, string.Empty, 0, (byte)AbilityGrantSlot.Primary, (int)SpellId.None, (int)SpellId.None, (int)SpellId.None);
             _equippedInstances.Remove(uiSlot);
+            SetEquipped(uiSlot, string.Empty, 0, (byte)AbilityGrantSlot.Primary, (int)SpellId.None, (int)SpellId.None, (int)SpellId.None);
 
             if (enableDebugLogs)
                 Debug.Log($"[PlayerEquipmentComponent] Unequipped {instance.itemDefId} from {uiSlot}.");
