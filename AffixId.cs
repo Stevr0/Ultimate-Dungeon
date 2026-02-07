@@ -86,5 +86,6 @@ namespace UltimateDungeon.Items
         // --------------------------------------------------------------------
         // APPEND NEW AFFIX IDS BELOW THIS LINE ONLY.
         // --------------------------------------------------------------------
+        Vital_MaxHealth = Vital_MaxHP,
     }
 }

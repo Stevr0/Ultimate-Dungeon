@@ -193,6 +193,33 @@ namespace UltimateDungeon.Players.Networking
             if (stats == null)
                 stats = GetComponentInChildren<UltimateDungeon.Players.PlayerStats>(true);
 
+            if (stats == null)
+                stats = GetComponentInParent<UltimateDungeon.Players.PlayerStats>();
+
+            if (equipment == null)
+                equipment = GetComponentInChildren<UltimateDungeon.Items.PlayerEquipmentComponent>(true);
+
+            if (equipment == null)
+                equipment = GetComponentInParent<UltimateDungeon.Items.PlayerEquipmentComponent>();
+
+            if (playerCore == null)
+                playerCore = GetComponentInChildren<UltimateDungeon.Players.PlayerCore>(true);
+
+            if (playerCore == null)
+                playerCore = GetComponentInParent<UltimateDungeon.Players.PlayerCore>();
+
+            if (vitals == null)
+                vitals = GetComponentInChildren<UltimateDungeon.Combat.ActorVitals>(true);
+
+            if (vitals == null)
+                vitals = GetComponentInParent<UltimateDungeon.Combat.ActorVitals>();
+
+            if (regenServer == null)
+                regenServer = GetComponentInChildren<UltimateDungeon.Players.PlayerVitalsRegenServer>(true);
+
+            if (regenServer == null)
+                regenServer = GetComponentInParent<UltimateDungeon.Players.PlayerVitalsRegenServer>();
+
             if (IsServer)
             {
                 SubscribeToEquipment();
@@ -249,6 +276,11 @@ namespace UltimateDungeon.Players.Networking
             if (!IsServer)
                 return;
 
+            if (enableDebugLogs)
+            {
+                Debug.Log($"[PlayerStatsNet] Recompute ({reason}) equipmentNull={equipment == null}");
+            }
+
             var definition = playerCore != null ? playerCore.definition : null;
             int baseStr = stats != null ? stats.BaseSTR : (definition != null ? definition.baseSTR : 0);
             int baseDex = stats != null ? stats.BaseDEX : (definition != null ? definition.baseDEX : 0);
@@ -277,6 +309,11 @@ namespace UltimateDungeon.Players.Networking
 
                     foreach (var affix in instance.affixes)
                     {
+                        if (enableDebugLogs)
+                        {
+                            Debug.Log($"[PlayerStatsNet] Affix {affix.id} magnitude={affix.magnitude:0.##}");
+                        }
+
                         switch (affix.id)
                         {
                             case UltimateDungeon.Items.AffixId.Stat_MaxStrength:
@@ -288,7 +325,7 @@ namespace UltimateDungeon.Players.Networking
                             case UltimateDungeon.Items.AffixId.Stat_MaxInteligence:
                                 _itemBonusInt += Mathf.RoundToInt(affix.magnitude);
                                 break;
-                            case UltimateDungeon.Items.AffixId.Vital_MaxHP:
+                            case UltimateDungeon.Items.AffixId.Vital_MaxHealth:
                                 _itemBonusMaxHp += Mathf.RoundToInt(affix.magnitude);
                                 break;
                             case UltimateDungeon.Items.AffixId.Vital_MaxStamina:
