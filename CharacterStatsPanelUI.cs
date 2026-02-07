@@ -255,9 +255,9 @@ namespace UltimateDungeon.UI.Panels
             AddRow(BuildAttributeLine("Intelligence", _statsNet != null ? _statsNet.BaseINT.Value : (int?)null, _statsNet != null ? _statsNet.INT.Value : (int?)null));
 
             AddHeader("Vitals");
-            int? maxHp = _statsNet != null ? _statsNet.MaxHP.Value : (_vitals != null ? _vitals.MaxHPNet.Value : (int?)null);
-            int? maxStamina = _statsNet != null ? _statsNet.MaxStamina.Value : (_vitals != null ? _vitals.MaxStaminaNet.Value : (int?)null);
-            int? maxMana = _statsNet != null ? _statsNet.MaxMana.Value : (_vitals != null ? _vitals.MaxManaNet.Value : (int?)null);
+            int? maxHp = _statsNet != null ? _statsNet.MaxHP.Value : (int?)null;
+            int? maxStamina = _statsNet != null ? _statsNet.MaxStamina.Value : (int?)null;
+            int? maxMana = _statsNet != null ? _statsNet.MaxMana.Value : (int?)null;
 
             AddRow(BuildVitalLine("Health", _vitals != null ? _vitals.CurrentHPNet.Value : (int?)null, maxHp));
             AddRow(BuildVitalLine("Stamina", _vitals != null ? _vitals.CurrentStaminaNet.Value : (int?)null, maxStamina));
