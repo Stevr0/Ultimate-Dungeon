@@ -37,27 +37,6 @@ using UnityEngine.SceneManagement;
 namespace UltimateDungeon.Scenes
 {
     // ========================================================================
-    // SpawnPoint
-    // ========================================================================
-    /// <summary>
-    /// Authored spawn location inside a gameplay scene.
-    /// </summary>
-    public sealed class SpawnPoint : MonoBehaviour
-    {
-        [Tooltip("Logical spawn tag (e.g. Default, Entrance, Exit).")]
-        public string Tag = "Default";
-
-#if UNITY_EDITOR
-        private void OnDrawGizmos()
-        {
-            Gizmos.color = Color.cyan;
-            Gizmos.DrawWireSphere(transform.position, 0.35f);
-            UnityEditor.Handles.Label(transform.position + Vector3.up * 0.5f, $"Spawn: {Tag}");
-        }
-#endif
-    }
-
-    // ========================================================================
     // ScenePortal
     // ========================================================================
     /// <summary>
