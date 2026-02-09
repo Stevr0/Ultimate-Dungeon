@@ -53,6 +53,34 @@ namespace UltimateDungeon.UI.Panels
         private readonly List<UltimateDungeon.StatusEffects.ActiveStatusEffect> _statusBuffer =
             new List<UltimateDungeon.StatusEffects.ActiveStatusEffect>();
 
+        // NEW: track whether we are currently subscribed.
+        // This prevents accidental double-subscribe if Bind() is called multiple times.
+        private bool _isSubscribed;
+
+
+        private void OnEnable()
+        {
+            // IMPORTANT:
+            // Your window system likely toggles the panel GameObject active/inactive.
+            // When it is disabled, OnDisable() unsubscribes.
+            // When it is re-enabled, Bind() is often NOT called again.
+            // So we must re-subscribe here if we are already bound.
+
+
+            // If we have at least one bound dependency, assume we were previously bound.
+            bool hasBinding = _statsNet != null || _combatStatsNet != null || _vitals != null ||
+            _skillBookNet != null || _statusRuntime != null || _currencyWallet != null;
+
+
+            if (!hasBinding)
+                return; // not bound yet
+
+
+            Subscribe();
+            Refresh();
+        }
+
+
         private void OnDisable()
         {
             Unsubscribe();
@@ -61,16 +89,20 @@ namespace UltimateDungeon.UI.Panels
         /// <summary>
         /// Bind to replicated player stats + combat stats.
         /// </summary>
+        /// <summary>
+        /// Bind to replicated player stats + combat stats.
+        /// </summary>
         public void Bind(
-            UltimateDungeon.Players.Networking.PlayerStatsNet statsNet,
-            UltimateDungeon.Players.Networking.PlayerCombatStatsNet combatStatsNet,
-            UltimateDungeon.Combat.ActorVitals vitals,
-            UltimateDungeon.Players.Networking.PlayerSkillBookNet skillBookNet,
-            UltimateDungeon.Players.PlayerCore playerCore,
-            UltimateDungeon.StatusEffects.IStatusEffectRuntime statusRuntime,
-            UltimateDungeon.Economy.IPlayerCurrencyWallet currencyWallet)
+        UltimateDungeon.Players.Networking.PlayerStatsNet statsNet,
+        UltimateDungeon.Players.Networking.PlayerCombatStatsNet combatStatsNet,
+        UltimateDungeon.Combat.ActorVitals vitals,
+        UltimateDungeon.Players.Networking.PlayerSkillBookNet skillBookNet,
+        UltimateDungeon.Players.PlayerCore playerCore,
+        UltimateDungeon.StatusEffects.IStatusEffectRuntime statusRuntime,
+        UltimateDungeon.Economy.IPlayerCurrencyWallet currencyWallet)
         {
             Unsubscribe();
+
 
             _statsNet = statsNet;
             _combatStatsNet = combatStatsNet;
@@ -80,12 +112,18 @@ namespace UltimateDungeon.UI.Panels
             _statusRuntime = statusRuntime;
             _currencyWallet = currencyWallet;
 
+
             Subscribe();
             Refresh();
         }
 
         private void Subscribe()
         {
+            // NEW: guard against double-subscribe.
+            if (_isSubscribed)
+                return;
+
+
             if (_statsNet != null)
             {
                 _statsNet.STR.OnValueChanged += OnStatChanged;
@@ -102,11 +140,13 @@ namespace UltimateDungeon.UI.Panels
                 _statsNet.ManaRegenPerSec.OnValueChanged += OnRegenChanged;
             }
 
+
             if (_combatStatsNet != null)
             {
                 _combatStatsNet.AttackerHciPct.OnValueChanged += OnCombatFloatChanged;
                 _combatStatsNet.DefenderDciPct.OnValueChanged += OnCombatFloatChanged;
                 _combatStatsNet.DamageIncreasePct.OnValueChanged += OnCombatFloatChanged;
+
 
                 _combatStatsNet.ResistPhysical.OnValueChanged += OnCombatIntChanged;
                 _combatStatsNet.ResistFire.OnValueChanged += OnCombatIntChanged;
@@ -114,16 +154,19 @@ namespace UltimateDungeon.UI.Panels
                 _combatStatsNet.ResistPoison.OnValueChanged += OnCombatIntChanged;
                 _combatStatsNet.ResistEnergy.OnValueChanged += OnCombatIntChanged;
 
+
                 _combatStatsNet.WeaponName.OnValueChanged += OnWeaponNameChanged;
                 _combatStatsNet.WeaponMinDamage.OnValueChanged += OnCombatIntChanged;
                 _combatStatsNet.WeaponMaxDamage.OnValueChanged += OnCombatIntChanged;
                 _combatStatsNet.WeaponSwingSpeedSeconds.OnValueChanged += OnCombatFloatChanged;
+
 
                 _combatStatsNet.CanAttack.OnValueChanged += OnCombatBoolChanged;
                 _combatStatsNet.CanCast.OnValueChanged += OnCombatBoolChanged;
                 _combatStatsNet.CanMove.OnValueChanged += OnCombatBoolChanged;
                 _combatStatsNet.CanBandage.OnValueChanged += OnCombatBoolChanged;
             }
+
 
             if (_vitals != null)
             {
@@ -135,11 +178,14 @@ namespace UltimateDungeon.UI.Panels
                 _vitals.MaxManaNet.OnValueChanged += OnVitalChanged;
             }
 
+
             if (_skillBookNet != null)
                 _skillBookNet.Skills.OnListChanged += OnSkillListChanged;
 
+
             if (_statusRuntime != null)
                 _statusRuntime.StatusesChanged += OnStatusesChanged;
+
 
             if (_currencyWallet != null)
                 _currencyWallet.CurrencyChanged += OnCurrencyChanged;
@@ -147,6 +193,10 @@ namespace UltimateDungeon.UI.Panels
 
         private void Unsubscribe()
         {
+            if (!_isSubscribed)
+                return;
+
+
             if (_statsNet != null)
             {
                 _statsNet.STR.OnValueChanged -= OnStatChanged;
@@ -163,11 +213,13 @@ namespace UltimateDungeon.UI.Panels
                 _statsNet.ManaRegenPerSec.OnValueChanged -= OnRegenChanged;
             }
 
+
             if (_combatStatsNet != null)
             {
                 _combatStatsNet.AttackerHciPct.OnValueChanged -= OnCombatFloatChanged;
                 _combatStatsNet.DefenderDciPct.OnValueChanged -= OnCombatFloatChanged;
                 _combatStatsNet.DamageIncreasePct.OnValueChanged -= OnCombatFloatChanged;
+
 
                 _combatStatsNet.ResistPhysical.OnValueChanged -= OnCombatIntChanged;
                 _combatStatsNet.ResistFire.OnValueChanged -= OnCombatIntChanged;
@@ -175,16 +227,19 @@ namespace UltimateDungeon.UI.Panels
                 _combatStatsNet.ResistPoison.OnValueChanged -= OnCombatIntChanged;
                 _combatStatsNet.ResistEnergy.OnValueChanged -= OnCombatIntChanged;
 
+
                 _combatStatsNet.WeaponName.OnValueChanged -= OnWeaponNameChanged;
                 _combatStatsNet.WeaponMinDamage.OnValueChanged -= OnCombatIntChanged;
                 _combatStatsNet.WeaponMaxDamage.OnValueChanged -= OnCombatIntChanged;
                 _combatStatsNet.WeaponSwingSpeedSeconds.OnValueChanged -= OnCombatFloatChanged;
+
 
                 _combatStatsNet.CanAttack.OnValueChanged -= OnCombatBoolChanged;
                 _combatStatsNet.CanCast.OnValueChanged -= OnCombatBoolChanged;
                 _combatStatsNet.CanMove.OnValueChanged -= OnCombatBoolChanged;
                 _combatStatsNet.CanBandage.OnValueChanged -= OnCombatBoolChanged;
             }
+
 
             if (_vitals != null)
             {
@@ -196,14 +251,20 @@ namespace UltimateDungeon.UI.Panels
                 _vitals.MaxManaNet.OnValueChanged -= OnVitalChanged;
             }
 
+
             if (_skillBookNet != null)
                 _skillBookNet.Skills.OnListChanged -= OnSkillListChanged;
+
 
             if (_statusRuntime != null)
                 _statusRuntime.StatusesChanged -= OnStatusesChanged;
 
+
             if (_currencyWallet != null)
                 _currencyWallet.CurrencyChanged -= OnCurrencyChanged;
+
+
+            _isSubscribed = false;
         }
 
         private void OnStatChanged(int previous, int current)
