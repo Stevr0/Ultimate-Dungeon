@@ -1,5 +1,4 @@
 using UnityEngine;
-using UltimateDungeon.Combat;
 
 namespace UltimateDungeon.Players
 {
@@ -52,7 +51,7 @@ namespace UltimateDungeon.Players
         public int WeaponMaxDamage;
         public float WeaponSwingSpeedSeconds;
         public int WeaponStaminaCostPerSwing;
-        public DamageType WeaponDamageType;
+        public UltimateDungeon.Combat.DamageType WeaponDamageType;
 
         public int ResistPhysical;
         public int ResistFire;
