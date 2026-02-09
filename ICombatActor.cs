@@ -86,6 +86,50 @@ namespace UltimateDungeon.Combat
         float GetBaseSwingTimeSeconds();
 
         // -------------------------
+        // Weapon + combat stats
+        // -------------------------
+
+        /// <summary>
+        /// Minimum weapon damage (snapshot-derived).
+        /// </summary>
+        int GetWeaponMinDamage();
+
+        /// <summary>
+        /// Maximum weapon damage (snapshot-derived).
+        /// </summary>
+        int GetWeaponMaxDamage();
+
+        /// <summary>
+        /// Damage increase percentage (e.g., 0.15 = +15%).
+        /// </summary>
+        float GetDamageIncreasePct();
+
+        /// <summary>
+        /// Weapon damage type for this actor.
+        /// </summary>
+        DamageType GetWeaponDamageType();
+
+        /// <summary>
+        /// Attacker hit chance increase (HCI), returned as a percentage (0.10 = +10%).
+        /// </summary>
+        float GetAttackerHitChancePct();
+
+        /// <summary>
+        /// Defender chance to defend (DCI), returned as a percentage (0.10 = +10%).
+        /// </summary>
+        float GetDefenderDefenseChancePct();
+
+        /// <summary>
+        /// Stamina cost per swing for this actor's weapon.
+        /// </summary>
+        int GetStaminaCostPerSwing();
+
+        /// <summary>
+        /// Attempts to spend stamina on the server.
+        /// </summary>
+        bool TrySpendStamina(int amount);
+
+        // -------------------------
         // Damage application
         // -------------------------
 
