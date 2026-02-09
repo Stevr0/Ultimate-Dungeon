@@ -1,61 +1,53 @@
 // ============================================================================
 // SceneTransitionService.cs — Ultimate Dungeon (Authoritative Scene Loader)
 // ----------------------------------------------------------------------------
-// GOAL
-// - Make the "SceneTransitionService" component show up in Unity's Add Component
-//   menu, and reliably run on the SERVER to load the initial gameplay scene.
+// PURPOSE
+// - Server-authoritative scene transitions using NGO additive scene loading.
+// - Designed to live in SCN_Bootstrap and persist via DontDestroyOnLoad.
+// - Loads initial gameplay scene on host start (optional).
+// - Supports portal-triggered transitions to other gameplay scenes.
 //
-// WHY A SEPARATE FILE
-// - Unity lists attachable components by scanning compiled MonoBehaviours /
-//   NetworkBehaviours.
-// - If you had multiple classes in one file and Unity only showed the shim
-//   (SceneTransitionSystem), it usually means the service class did not compile
-//   or Unity isn't actually using the file you think it is.
-// - Putting the service in its own file with a matching class name eliminates
-//   ambiguity and makes the inspector workflow predictable.
+// FIXES IN THIS VERSION
+// 1) Teleport now hardens against NavMeshAgent "random snap" issues:
+//    - Clears any old path (ResetPath)
+//    - Temporarily disables agent, moves transform / NetworkTransform
+//    - Re-enables and Warps agent to a sampled NavMesh point
 //
-// REQUIRED SETUP (SCN_Bootstrap)
-// 1) Create a GameObject named "SceneTransitionService".
-// 2) Add this component (SceneTransitionService).
-// 3) Add a NetworkObject component to the SAME GameObject.
-//    - IMPORTANT: It must be a Scene Object (Spawn With Scene).
-// 4) Start Play Mode, click HOST.
-//    - The server will load InitialGameplaySceneName additively.
+// 2) Uses correct NetworkBehaviour references:
+//    - Connected clients are accessed through NetworkManager.Singleton
+//      (NOT NetworkManager.ConnectedClients, which is an instance property)
 //
-// REQUIRED SETUP (Gameplay scenes)
-// - Add at least one SpawnPoint with Tag "Default".
-// - Add exactly one SceneRuleProvider (owned by your SceneRules system).
+// 3) Keeps the original singleton API:
+//    - SceneTransitionService.Instance exists so ScenePortal can find it.
 //
-// NOTE
-// - This script does NOT attempt to decide legality; it only loads scenes and
-//   teleports players.
-// - "RequireOutOfCombat" should be checked using your player combat state
-//   component (TODO hook below). We deliberately do not gate on scene flags.
+// WHERE TO PUT
+//   Assets/_Scripts/Scenes/SceneTransitionService.cs
 // ============================================================================
 
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using Unity.Netcode;
+using Unity.Netcode.Components;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 
 namespace UltimateDungeon.Scenes
 {
-    /// <summary>
-    /// SceneTransitionService
-    /// ----------------------
-    /// Server-authoritative additive scene loader/unloader.
-    ///
-    /// IMPORTANT:
-    /// - This must be on a spawned NetworkObject, or OnNetworkSpawn will never fire.
-    /// - In practice: add NetworkObject + mark it as a Scene Object in SCN_Bootstrap.
-    /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(NetworkObject))]
     public sealed class SceneTransitionService : NetworkBehaviour
     {
+        // --------------------------------------------------------------------
+        // Singleton
+        // --------------------------------------------------------------------
+
         public static SceneTransitionService Instance { get; private set; }
+
+        // --------------------------------------------------------------------
+        // Inspector
+        // --------------------------------------------------------------------
 
         [Header("Bootstrap")]
         [Tooltip("Name of the bootstrap scene (kept loaded).")]
@@ -74,13 +66,22 @@ namespace UltimateDungeon.Scenes
         [Header("Runtime (Read-only)")]
         [SerializeField] private string currentGameplayScene;
 
+        // --------------------------------------------------------------------
+        // Internal transition bookkeeping
+        // --------------------------------------------------------------------
+
         private bool waitingForLoad;
         private bool waitingForUnload;
-        private string pendingSceneName;
+        private string pendingLoadScene;
+        private string pendingUnloadScene;
+
+        // --------------------------------------------------------------------
+        // Unity lifetime
+        // --------------------------------------------------------------------
 
         private void Awake()
         {
-            // Singleton pattern so portals can find us easily.
+            // Standard singleton.
             if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
@@ -95,27 +96,29 @@ namespace UltimateDungeon.Scenes
         {
             base.OnNetworkSpawn();
 
-            // We ONLY load scenes on the server.
+            // Only the server is allowed to load/unload scenes.
             if (!IsServer)
                 return;
 
-            // Subscribe to NGO events.
-            NetworkManager.OnClientConnectedCallback += OnClientConnected;
+            // Hook client join so late joiners get teleported into the current gameplay scene.
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
 
-            var sm = NetworkManager.SceneManager;
+            // Hook NGO scene events.
+            var sm = NetworkManager.Singleton.SceneManager;
             if (sm == null)
             {
-                Debug.LogError("[SceneTransitionService] NetworkManager.SceneManager is null. NGO Scene Management may be disabled.");
+                Debug.LogError("[SceneTransitionService] NetworkManager.SceneManager is null. Is NGO Scene Management disabled on NetworkManager?");
                 return;
             }
 
             sm.OnLoadEventCompleted += OnLoadEventCompleted;
             sm.OnUnloadEventCompleted += OnUnloadEventCompleted;
+            Debug.Log("[SceneTransitionService] Subscribed to SceneManager load/unload callbacks.", this);
 
-            // If we already have a gameplay scene loaded (rare), respect it.
+            // If a gameplay scene is already loaded (rare in bootstrap flow), respect it.
             currentGameplayScene = FindCurrentGameplaySceneName();
 
-            // Normal bootstrap flow: no gameplay scene yet.
+            // Normal flow: SCN_Bootstrap is loaded first, then server loads the initial gameplay scene.
             if (AutoLoadInitialGameplayScene && string.IsNullOrWhiteSpace(currentGameplayScene))
             {
                 if (string.IsNullOrWhiteSpace(InitialGameplaySceneName))
@@ -124,21 +127,24 @@ namespace UltimateDungeon.Scenes
                     return;
                 }
 
-                Debug.Log($"[SceneTransitionService] Host started. Loading initial gameplay scene '{InitialGameplaySceneName}'...");
+                Debug.Log($"[SceneTransitionService] Host started. Loading initial gameplay scene '{InitialGameplaySceneName}'...", this);
+
+                // After initial scene loads, teleport everyone currently connected (host player).
                 StartCoroutine(ServerLoadGameplayScene(InitialGameplaySceneName, teleportAllPlayersOnComplete: true));
             }
         }
 
         public override void OnNetworkDespawn()
         {
-            if (IsServer && NetworkManager != null)
+            if (IsServer && NetworkManager.Singleton != null)
             {
-                NetworkManager.OnClientConnectedCallback -= OnClientConnected;
+                NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
 
-                if (NetworkManager.SceneManager != null)
+                var sm = NetworkManager.Singleton.SceneManager;
+                if (sm != null)
                 {
-                    NetworkManager.SceneManager.OnLoadEventCompleted -= OnLoadEventCompleted;
-                    NetworkManager.SceneManager.OnUnloadEventCompleted -= OnUnloadEventCompleted;
+                    sm.OnLoadEventCompleted -= OnLoadEventCompleted;
+                    sm.OnUnloadEventCompleted -= OnUnloadEventCompleted;
                 }
             }
 
@@ -146,12 +152,9 @@ namespace UltimateDungeon.Scenes
         }
 
         // --------------------------------------------------------------------
-        // Public entry point used by portals (server rpc).
+        // Entry point used by portals
         // --------------------------------------------------------------------
 
-        /// <summary>
-        /// Client asks the server to transition them to another gameplay scene.
-        /// </summary>
         [ServerRpc(RequireOwnership = false)]
         public void RequestSceneTransitionServerRpc(
             ulong requestingClientId,
@@ -159,18 +162,31 @@ namespace UltimateDungeon.Scenes
             string destinationSpawnTag,
             bool requireOutOfCombat)
         {
-            if (!IsServer) return;
-            if (waitingForLoad || waitingForUnload) return;
-            if (string.IsNullOrWhiteSpace(destinationSceneName)) return;
+            Debug.Log(
+                $"[SceneTransitionService] RPC ENTER dest='{destinationSceneName}' tag='{destinationSpawnTag}' " +
+                $"IsServer={IsServer} waitingLoad={waitingForLoad} waitingUnload={waitingForUnload}",
+                this);
 
-            if (!NetworkManager.ConnectedClients.TryGetValue(requestingClientId, out var client)) return;
+            if (!IsServer)
+                return;
+
+            // If we are mid-transition, refuse new transitions (MVP).
+            if (waitingForLoad || waitingForUnload)
+                return;
+
+            if (string.IsNullOrWhiteSpace(destinationSceneName))
+                return;
+
+            // Validate this client exists and has a spawned player.
+            if (!NetworkManager.Singleton.ConnectedClients.TryGetValue(requestingClientId, out var client))
+                return;
+
             var playerObj = client.PlayerObject;
-            if (!playerObj) return;
+            if (!playerObj)
+                return;
 
-            // TODO: Out-of-combat is a PLAYER STATE check.
-            // If you want it now, wire to your real combat component:
-            // - e.g. var tracker = playerObj.GetComponentInChildren<CombatStateTracker>();
-            // - if (requireOutOfCombat && tracker != null && tracker.IsInCombat) return;
+            // TODO: enforce requireOutOfCombat using your combat tracker.
+            // For now, we accept the transition.
 
             StartCoroutine(ServerTransitionRoutine(requestingClientId, destinationSceneName, destinationSpawnTag));
         }
@@ -184,11 +200,11 @@ namespace UltimateDungeon.Scenes
             if (!string.IsNullOrWhiteSpace(currentGameplayScene) && currentGameplayScene != destScene)
                 yield return ServerUnloadGameplayScene(currentGameplayScene);
 
-            // 3) Load destination scene.
+            // 3) Load destination scene if needed.
             if (currentGameplayScene != destScene)
                 yield return ServerLoadGameplayScene(destScene, teleportAllPlayersOnComplete: false);
 
-            // 4) Teleport requesting player.
+            // 4) Teleport just the requesting player.
             TeleportPlayerToSpawn(clientId, spawnTag);
         }
 
@@ -196,16 +212,37 @@ namespace UltimateDungeon.Scenes
         // Load / Unload (server)
         // --------------------------------------------------------------------
 
-        private IEnumerator ServerLoadGameplayScene(string sceneName, bool teleportAllPlayersOnComplete)
+        private IEnumerator ServerLoadGameplayScene(string sceneName, bool teleportAllPlayersOnComplete = false)
         {
             waitingForLoad = true;
-            pendingSceneName = sceneName;
+            pendingLoadScene = sceneName;
+
+            // We set the current gameplay scene name before load completes so
+            // teleport logic knows where to search once the scene is loaded.
             currentGameplayScene = sceneName;
 
-            NetworkManager.SceneManager.LoadScene(sceneName, LoadSceneMode.Additive);
+            Debug.Log($"[SceneTransitionService] LoadScene START '{sceneName}'", this);
 
-            // Wait for NGO to report scene load completion.
-            while (waitingForLoad) yield return null;
+            NetworkManager.Singleton.SceneManager.LoadScene(sceneName, LoadSceneMode.Additive);
+
+            // Timeout safety.
+            float timeout = 10f;
+            while (waitingForLoad && timeout > 0f)
+            {
+                timeout -= Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            if (waitingForLoad)
+            {
+                Debug.LogError(
+                    $"[SceneTransitionService] LoadScene TIMEOUT '{sceneName}'. " +
+                    $"Check: NetworkManager -> Enable Scene Management, and BuildSettings includes the scene name.",
+                    this);
+                waitingForLoad = false;
+            }
+
+            Debug.Log($"[SceneTransitionService] LoadScene DONE '{sceneName}'", this);
 
             if (teleportAllPlayersOnComplete)
                 TeleportAllPlayersToSpawn(InitialSpawnTag);
@@ -214,59 +251,160 @@ namespace UltimateDungeon.Scenes
         private IEnumerator ServerUnloadGameplayScene(string sceneName)
         {
             waitingForUnload = true;
-            pendingSceneName = sceneName;
+            pendingUnloadScene = sceneName;
+
+            Debug.Log($"[SceneTransitionService] UnloadScene START '{sceneName}'", this);
 
             var unityScene = SceneManager.GetSceneByName(sceneName);
             if (unityScene.IsValid() && unityScene.isLoaded)
-                NetworkManager.SceneManager.UnloadScene(unityScene);
+                NetworkManager.Singleton.SceneManager.UnloadScene(unityScene);
 
-            while (waitingForUnload) yield return null;
+            float timeout = 10f;
+            while (waitingForUnload && timeout > 0f)
+            {
+                timeout -= Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            if (waitingForUnload)
+            {
+                Debug.LogError($"[SceneTransitionService] UnloadScene TIMEOUT '{sceneName}'", this);
+                waitingForUnload = false;
+            }
+
+            Debug.Log($"[SceneTransitionService] UnloadScene DONE '{sceneName}'", this);
         }
 
         private void OnLoadEventCompleted(string sceneName, LoadSceneMode mode, List<ulong> _, List<ulong> __)
         {
-            if (!IsServer) return;
-            if (sceneName == pendingSceneName)
-                waitingForUnload = false;
+            Debug.Log($"[SceneTransitionService] OnLoadEventCompleted '{sceneName}' pending='{pendingLoadScene}'", this);
+
+            if (sceneName == pendingLoadScene)
+                waitingForLoad = false;
         }
 
         private void OnUnloadEventCompleted(string sceneName, LoadSceneMode mode, List<ulong> _, List<ulong> __)
         {
-            if (!IsServer) return;
-            if (sceneName == pendingSceneName)
+            Debug.Log($"[SceneTransitionService] OnUnloadEventCompleted '{sceneName}' pending='{pendingUnloadScene}'", this);
+
+            if (sceneName == pendingUnloadScene)
                 waitingForUnload = false;
         }
 
         // --------------------------------------------------------------------
-        // Teleport
+        // Teleport (server)
         // --------------------------------------------------------------------
 
         private void TeleportAllPlayersToSpawn(string spawnTag)
         {
-            foreach (var kvp in NetworkManager.ConnectedClients)
+            foreach (var kvp in NetworkManager.Singleton.ConnectedClients)
                 TeleportPlayerToSpawn(kvp.Key, spawnTag);
         }
 
         private void TeleportPlayerToSpawn(ulong clientId, string spawnTag)
         {
-            if (!NetworkManager.ConnectedClients.TryGetValue(clientId, out var client)) return;
+            if (!NetworkManager.Singleton.ConnectedClients.TryGetValue(clientId, out var client))
+                return;
+
             var playerObj = client.PlayerObject;
-            if (!playerObj) return;
+            if (!playerObj)
+                return;
 
             var scene = SceneManager.GetSceneByName(currentGameplayScene);
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                Debug.LogWarning(
+                    $"[SceneTransitionService] TeleportPlayerToSpawn: gameplay scene '{currentGameplayScene}' is not loaded. clientId={clientId}",
+                    this);
+                return;
+            }
 
-            // NOTE: SpawnPoint is a simple MonoBehaviour in your project.
-            var sp = FindSpawnPoint(scene, spawnTag) ?? FindSpawnPoint(scene, "Default");
+            // Find requested tag, else Default.
+            SpawnPoint sp = FindSpawnPoint(scene, spawnTag);
+            if (!sp && !string.Equals(spawnTag, "Default", StringComparison.OrdinalIgnoreCase))
+            {
+                Debug.LogWarning(
+                    $"[SceneTransitionService] SpawnPoint tag '{spawnTag}' not found in scene '{currentGameplayScene}'. Falling back to 'Default'.",
+                    this);
+                sp = FindSpawnPoint(scene, "Default");
+            }
 
-            var pos = sp ? sp.transform.position : Vector3.zero;
-            var rot = sp ? sp.transform.rotation : Quaternion.identity;
+            if (!sp)
+            {
+                Debug.LogError(
+                    $"[SceneTransitionService] NO SpawnPoint found in scene '{currentGameplayScene}' for tag '{spawnTag}' or 'Default'. Teleport cancelled.",
+                    this);
+                return;
+            }
 
-            playerObj.transform.SetPositionAndRotation(pos, rot);
+            Vector3 targetPos = sp.transform.position;
+            Quaternion targetRot = sp.transform.rotation;
+
+            // --------------------
+            // NavMeshAgent hardening
+            // --------------------
+            // If you move the transform while an agent is enabled, the agent may
+            // immediately snap to a different spot or continue an old path.
+            var agent = playerObj.GetComponent<NavMeshAgent>();
+            bool hadAgent = agent != null;
+            bool agentWasEnabled = false;
+
+            if (hadAgent)
+            {
+                agentWasEnabled = agent.enabled;
+
+                if (agent.enabled)
+                {
+                    // Stop + clear destination so it doesn't keep walking.
+                    agent.isStopped = true;
+                    agent.ResetPath();
+                }
+
+                // Disable before moving the transform.
+                agent.enabled = false;
+            }
+
+            // --------------------
+            // NetworkTransform hardening
+            // --------------------
+            // Prefer Teleport so clients snap instead of interpolating.
+            var netTransform = playerObj.GetComponent<NetworkTransform>();
+            if (netTransform != null)
+            {
+                netTransform.Teleport(targetPos, targetRot, playerObj.transform.localScale);
+            }
+            else
+            {
+                playerObj.transform.SetPositionAndRotation(targetPos, targetRot);
+            }
+
+            // Re-enable + warp agent onto navmesh.
+            if (hadAgent)
+            {
+                agent.enabled = agentWasEnabled;
+
+                if (agent.enabled)
+                {
+                    // If spawn isn't exactly on mesh, sample nearby to avoid off-mesh agent.
+                    if (NavMesh.SamplePosition(targetPos, out var hit, 2.0f, NavMesh.AllAreas))
+                        agent.Warp(hit.position);
+                    else
+                        agent.Warp(targetPos);
+
+                    agent.ResetPath();
+                    agent.isStopped = true;
+                }
+            }
+
+            Debug.Log(
+                $"[SceneTransitionService] Teleported clientId={clientId} to SpawnPoint tag='{sp.Tag}' scene='{currentGameplayScene}' pos={targetPos}",
+                this);
         }
 
         private static SpawnPoint FindSpawnPoint(Scene scene, string tag)
         {
-            if (!scene.isLoaded) return null;
+            if (!scene.isLoaded)
+                return null;
 
             foreach (var root in scene.GetRootGameObjects())
             {
@@ -282,19 +420,21 @@ namespace UltimateDungeon.Scenes
         }
 
         // --------------------------------------------------------------------
-        // Clears required by SCENE_RULE_PROVIDER.md (best-effort)
+        // Clears required by Scene rules (best-effort)
         // --------------------------------------------------------------------
 
         private static void ClearIllegalState(ulong clientId)
         {
-            if (!NetworkManager.Singleton) return;
-            if (!NetworkManager.Singleton.ConnectedClients.TryGetValue(clientId, out var client)) return;
+            if (!NetworkManager.Singleton)
+                return;
+
+            if (!NetworkManager.Singleton.ConnectedClients.TryGetValue(clientId, out var client))
+                return;
 
             var player = client.PlayerObject;
-            if (!player) return;
+            if (!player)
+                return;
 
-            // These calls are intentionally "best effort" because we do not want
-            // this loader to hard-depend on unrelated systems.
             TryInvoke(player, "PlayerTargeting", "ClearSelection");
             TryInvoke(player, "PlayerTargeting", "ClearTarget");
             TryInvoke(player, "AttackLoop", "CancelAll");
@@ -316,7 +456,7 @@ namespace UltimateDungeon.Scenes
                 if (m != null)
                     m.Invoke(mb, null);
 
-                return; // only invoke once per type
+                return; // invoke once per type
             }
         }
 
@@ -350,8 +490,10 @@ namespace UltimateDungeon.Scenes
                 if (!scn.isLoaded) continue;
                 if (scn.name == "DontDestroyOnLoad") continue;
                 if (!string.IsNullOrWhiteSpace(BootstrapSceneName) && scn.name == BootstrapSceneName) continue;
-                return scn.name;
+
+                return scn.name; // first non-bootstrap loaded scene
             }
+
             return string.Empty;
         }
     }
