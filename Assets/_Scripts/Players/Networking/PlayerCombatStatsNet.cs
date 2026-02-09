@@ -10,8 +10,7 @@
 //
 // IMPORTANT:
 // - This does NOT implement new combat math. It only mirrors existing state.
-// - If no authoritative aggregator exists yet, we build a minimal snapshot
-//   from current equipment/affixes and clearly label it as a TEMPORARY adapter.
+// - Combat stats are sourced from PlayerCombatStatsServer snapshots.
 //
 // Store at:
 // Assets/_Scripts/Players/Networking/PlayerCombatStatsNet.cs
@@ -36,14 +35,8 @@ namespace UltimateDungeon.Players.Networking
         // --------------------------------------------------------------------
 
         [Header("References")]
-        [Tooltip("Equipment source (server authoritative).")]
-        [SerializeField] private UltimateDungeon.Items.PlayerEquipmentComponent equipment;
-
         [Tooltip("Authoritative combat stats aggregator (server-only).")]
         [SerializeField] private UltimateDungeon.Players.PlayerCombatStatsServer combatStatsServer;
-
-        [Tooltip("Optional: player core for future aggregator hooks.")]
-        [SerializeField] private UltimateDungeon.Players.PlayerCore playerCore;
 
         [Header("Update")]
         [Tooltip("Server poll interval for snapshot replication.")]
@@ -179,12 +172,6 @@ namespace UltimateDungeon.Players.Networking
 
         private void Reset()
         {
-            if (equipment == null)
-                equipment = GetComponentInChildren<UltimateDungeon.Items.PlayerEquipmentComponent>(true);
-
-            if (playerCore == null)
-                playerCore = GetComponentInChildren<UltimateDungeon.Players.PlayerCore>(true);
-
             if (combatStatsServer == null)
                 combatStatsServer = GetComponentInChildren<UltimateDungeon.Players.PlayerCombatStatsServer>(true);
         }
@@ -192,9 +179,6 @@ namespace UltimateDungeon.Players.Networking
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
-
-            if (equipment == null)
-                equipment = GetComponentInChildren<UltimateDungeon.Items.PlayerEquipmentComponent>(true);
 
             if (combatStatsServer == null)
                 combatStatsServer = GetComponentInChildren<UltimateDungeon.Players.PlayerCombatStatsServer>(true);
@@ -224,7 +208,7 @@ namespace UltimateDungeon.Players.Networking
         /// </summary>
         private void PushSnapshot(bool force)
         {
-            var snapshot = BuildSnapshotFromCurrentState();
+            var snapshot = GetAuthoritativeSnapshot();
 
             bool anyChanged = force;
 
@@ -243,7 +227,10 @@ namespace UltimateDungeon.Players.Networking
             anyChanged |= SetIfChanged(ref _lastCanMove, snapshot.CanMove, CanMove, force);
             anyChanged |= SetIfChanged(ref _lastCanBandage, snapshot.CanBandage, CanBandage, force);
 
-            anyChanged |= SetIfChanged(ref _lastWeaponName, snapshot.WeaponName, WeaponName, force);
+            var weaponName = new FixedString64Bytes(
+                string.IsNullOrWhiteSpace(snapshot.WeaponName) ? "Unarmed" : snapshot.WeaponName);
+
+            anyChanged |= SetIfChanged(ref _lastWeaponName, weaponName, WeaponName, force);
             anyChanged |= SetIfChanged(ref _lastWeaponMinDamage, snapshot.WeaponMinDamage, WeaponMinDamage, force);
             anyChanged |= SetIfChanged(ref _lastWeaponMaxDamage, snapshot.WeaponMaxDamage, WeaponMaxDamage, force);
             anyChanged |= SetIfChanged(ref _lastWeaponSwingSpeedSeconds, snapshot.WeaponSwingSpeedSeconds, WeaponSwingSpeedSeconds, force);
@@ -253,63 +240,18 @@ namespace UltimateDungeon.Players.Networking
         }
 
         // --------------------------------------------------------------------
-        // Snapshot adapter (TEMPORARY)
+        // Snapshot adapter
         // --------------------------------------------------------------------
 
         /// <summary>
-        /// TEMPORARY ADAPTER:
-        /// Builds a minimal snapshot from current equipment/affixes/status gates.
-        ///
-        /// TODO:
-        /// - Replace this with the authoritative PlayerCombatStats aggregator
-        ///   once it exists, without changing replicated fields.
+        /// Mirrors the authoritative PlayerCombatStatsServer snapshot.
         /// </summary>
-        private CombatSnapshot BuildSnapshotFromCurrentState()
+        private UltimateDungeon.Players.PlayerCombatStatsSnapshot GetAuthoritativeSnapshot()
         {
-            var fallback = new CombatSnapshot
-            {
-                CanAttack = true,
-                CanCast = true,
-                CanMove = true,
-                CanBandage = true,
+            if (!IsServer || combatStatsServer == null)
+                return CreateDefaultSnapshot();
 
-                WeaponName = new FixedString64Bytes("Unarmed"),
-                WeaponMinDamage = 1,
-                WeaponMaxDamage = 4,
-                WeaponSwingSpeedSeconds = 2.0f
-            };
-
-            if (!IsServer)
-                return fallback;
-
-            if (combatStatsServer != null)
-            {
-                var stats = combatStatsServer.Snapshot;
-                return new CombatSnapshot
-                {
-                    ResistPhysical = stats.ResistPhysical,
-                    ResistFire = stats.ResistFire,
-                    ResistCold = stats.ResistCold,
-                    ResistPoison = stats.ResistPoison,
-                    ResistEnergy = stats.ResistEnergy,
-
-                    AttackerHciPct = stats.AttackerHciPct,
-                    DefenderDciPct = stats.DefenderDciPct,
-                    DamageIncreasePct = stats.DamageIncreasePct,
-
-                    CanAttack = stats.CanAttack,
-                    CanCast = stats.CanCast,
-                    CanMove = stats.CanMove,
-                    CanBandage = stats.CanBandage,
-
-                    WeaponName = new FixedString64Bytes(string.IsNullOrWhiteSpace(stats.WeaponName) ? "Unarmed" : stats.WeaponName),
-                    WeaponMinDamage = stats.WeaponMinDamage,
-                    WeaponMaxDamage = stats.WeaponMaxDamage,
-                    WeaponSwingSpeedSeconds = stats.WeaponSwingSpeedSeconds
-                };
-            }
-
-            return fallback;
+            return combatStatsServer.Snapshot;
         }
 
         // --------------------------------------------------------------------
@@ -356,27 +298,19 @@ namespace UltimateDungeon.Players.Networking
             return true;
         }
 
-        private struct CombatSnapshot
+        private static UltimateDungeon.Players.PlayerCombatStatsSnapshot CreateDefaultSnapshot()
         {
-            public int ResistPhysical;
-            public int ResistFire;
-            public int ResistCold;
-            public int ResistPoison;
-            public int ResistEnergy;
-
-            public float AttackerHciPct;
-            public float DefenderDciPct;
-            public float DamageIncreasePct;
-
-            public bool CanAttack;
-            public bool CanCast;
-            public bool CanMove;
-            public bool CanBandage;
-
-            public FixedString64Bytes WeaponName;
-            public int WeaponMinDamage;
-            public int WeaponMaxDamage;
-            public float WeaponSwingSpeedSeconds;
+            return new UltimateDungeon.Players.PlayerCombatStatsSnapshot
+            {
+                CanAttack = true,
+                CanCast = true,
+                CanMove = true,
+                CanBandage = true,
+                WeaponName = "Unarmed",
+                WeaponMinDamage = 1,
+                WeaponMaxDamage = 4,
+                WeaponSwingSpeedSeconds = 2.0f
+            };
         }
     }
 }
