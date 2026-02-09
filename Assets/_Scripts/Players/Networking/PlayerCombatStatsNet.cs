@@ -112,7 +112,7 @@ namespace UltimateDungeon.Players.Networking
 
             // Auto-wire the server aggregator if not assigned.
             if (serverStats == null)
-                serverStats = GetComponent<UltimateDungeon.Players.PlayerCombatStatsServer>();
+                serverStats = GetComponentInChildren<UltimateDungeon.Players.PlayerCombatStatsServer>(true);
 
             if (serverStats == null)
             {
