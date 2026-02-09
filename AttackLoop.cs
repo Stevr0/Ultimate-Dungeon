@@ -184,6 +184,14 @@ namespace UltimateDungeon.Combat
                     continue;
                 }
 
+                int staminaCost = Mathf.Max(0, _attacker.GetStaminaCostPerSwing());
+                if (staminaCost > 0 && !_attacker.TrySpendStamina(staminaCost))
+                {
+                    // Not enough stamina: deny this swing, briefly wait, then re-check.
+                    yield return new WaitForSeconds(0.25f);
+                    continue;
+                }
+
                 // Resolve swing (server-only).
                 CombatResolver.ResolveSwing(_attacker, _target);
             }

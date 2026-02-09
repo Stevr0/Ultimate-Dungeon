@@ -75,6 +75,76 @@ namespace UltimateDungeon.Combat
             return Mathf.Max(0.05f, baseSwingTimeSeconds);
         }
 
+        public int GetWeaponMinDamage()
+        {
+            if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                return Mathf.Max(0, combatStats.GetWeaponMinMaxDamage().Min);
+
+            return 1;
+        }
+
+        public int GetWeaponMaxDamage()
+        {
+            if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                return Mathf.Max(0, combatStats.GetWeaponMinMaxDamage().Max);
+
+            return 4;
+        }
+
+        public float GetDamageIncreasePct()
+        {
+            if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                return combatStats.GetDamageIncreasePct();
+
+            return 0f;
+        }
+
+        public DamageType GetWeaponDamageType()
+        {
+            if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                return combatStats.GetWeaponDamageType();
+
+            return DamageType.Physical;
+        }
+
+        public float GetAttackerHitChancePct()
+        {
+            if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                return combatStats.GetHitChanceStats().AttackerHciPct;
+
+            return 0f;
+        }
+
+        public float GetDefenderDefenseChancePct()
+        {
+            if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                return combatStats.GetHitChanceStats().DefenderDciPct;
+
+            return 0f;
+        }
+
+        public int GetStaminaCostPerSwing()
+        {
+            if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                return Mathf.Max(0, combatStats.GetStaminaCostPerSwing());
+
+            return 0;
+        }
+
+        public bool TrySpendStamina(int amount)
+        {
+            if (!IsServer)
+                return false;
+
+            if (_actorVitals == null)
+                _actorVitals = GetComponent<ActorVitals>();
+
+            if (_actorVitals == null)
+                return false;
+
+            return _actorVitals.TrySpendStamina(amount);
+        }
+
 
         public void ApplyDamageServer(int amount, DamageType damageType, ICombatActor source)
         {

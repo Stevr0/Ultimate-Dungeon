@@ -34,11 +34,11 @@ namespace UltimateDungeon.Combat
         // v0.1 tuning constants
         // -------------------------
 
-        private const int DEBUG_FIXED_DAMAGE = 5;
         private const float DEATH_DESPAWN_DELAY_SECONDS = 0.35f;
 
         // Tracks victims that have already triggered death handling.
         private static readonly HashSet<ulong> _deadActors = new HashSet<ulong>();
+        private static int _swingSequence;
 
         /// <summary>
         /// Resolve a completed weapon swing.
@@ -77,9 +77,16 @@ namespace UltimateDungeon.Combat
             // -------------------------
             // v0.1 Hit resolution
             // -------------------------
-            // v0.1: Always hit.
-            // v0.2+: Roll hit chance here and early return if miss.
-            bool hit = true;
+            int seed = UltimateDungeon.Progression.DeterministicRng.CombineSeed(
+                unchecked((int)attacker.NetId),
+                unchecked((int)target.NetId),
+                ++_swingSequence);
+            var rng = new UltimateDungeon.Progression.DeterministicRng(seed);
+
+            float baseHitChance = 0.5f;
+            float hitChance = baseHitChance + attacker.GetAttackerHitChancePct() - target.GetDefenderDefenseChancePct();
+            hitChance = Mathf.Clamp(hitChance, 0.05f, 0.95f);
+            bool hit = rng.NextFloat01() <= hitChance;
 
             if (!hit)
             {
@@ -91,27 +98,20 @@ namespace UltimateDungeon.Combat
             // -------------------------
             // Build DamagePacket (v0.1)
             // -------------------------
-            int finalDamage = DEBUG_FIXED_DAMAGE;
-            DamageType damageType = DamageType.Physical;
+            int minDamage = Mathf.Max(0, attacker.GetWeaponMinDamage());
+            int maxDamage = Mathf.Max(minDamage, attacker.GetWeaponMaxDamage());
+            int baseDamage = rng.NextInt(minDamage, maxDamage + 1);
 
-            if (attacker is Component attackerComponent &&
-                attackerComponent.TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
-            {
-                var range = combatStats.GetWeaponMinMaxDamage();
-                int minDamage = Mathf.Max(0, range.Min);
-                int maxDamage = Mathf.Max(minDamage, range.Max);
-                int baseDamage = (minDamage + maxDamage) / 2;
-
-                float damageIncrease = combatStats.GetDamageIncreasePct();
-                finalDamage = Mathf.Max(0, Mathf.RoundToInt(baseDamage * (1f + damageIncrease)));
-                damageType = combatStats.GetWeaponDamageType();
-            }
+            float damageIncrease = attacker.GetDamageIncreasePct();
+            int finalDamage = Mathf.Max(0, Mathf.RoundToInt(baseDamage * (1f + damageIncrease)));
+            DamageType damageType = attacker.GetWeaponDamageType();
 
             DamagePacket packet = DamagePacket.CreateWeaponHit(
                 attacker.NetId,
                 target.NetId,
                 finalDamage,
-                damageType
+                damageType,
+                seed
             );
 
             // Apply damage (server)
