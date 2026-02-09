@@ -101,7 +101,7 @@ namespace UltimateDungeon.Players
                             snapshot.WeaponMaxDamage = def.weapon.maxDamage;
                             snapshot.WeaponSwingSpeedSeconds = def.weapon.swingSpeedSeconds;
                             snapshot.WeaponStaminaCostPerSwing = def.weapon.staminaCostPerSwing;
-                            snapshot.WeaponDamageType = def.weapon.damageType;
+                            snapshot.WeaponDamageType = (UltimateDungeon.Combat.DamageType)def.weapon.damageType;
                         }
                     }
 
@@ -210,7 +210,7 @@ namespace UltimateDungeon.Players
             return _snapshot.DamageIncreasePct;
         }
 
-        public DamageType GetWeaponDamageType()
+        public UltimateDungeon.Combat.DamageType GetWeaponDamageType()
         {
             return _snapshot.WeaponDamageType;
         }
@@ -233,7 +233,7 @@ namespace UltimateDungeon.Players
                 WeaponMaxDamage = 4,
                 WeaponSwingSpeedSeconds = 2.0f,
                 WeaponStaminaCostPerSwing = 0,
-                WeaponDamageType = DamageType.Physical
+                WeaponDamageType = UltimateDungeon.Combat.DamageType.Physical
             };
         }
     }
