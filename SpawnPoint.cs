@@ -1,5 +1,5 @@
 // ============================================================================
-// SpawnPoint.cs � Ultimate Dungeon (MVP)
+// SpawnPoint.cs — Ultimate Dungeon (MVP)
 // ----------------------------------------------------------------------------
 // PURPOSE
 // - Provides an authored spawn transform inside a gameplay scene (Village/Dungeon/etc.).
