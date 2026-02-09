@@ -54,11 +54,23 @@ namespace UltimateDungeon.Combat
         }
 
 
-        public bool CanAttack => true; // v0.1 always true (status gates come later via aggregated stats)
+        public bool CanAttack
+        {
+            get
+            {
+                if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                    return combatStats.GetCanAttack();
+
+                return true; // v0.1 always true (status gates come later via aggregated stats)
+            }
+        }
 
 
         public float GetBaseSwingTimeSeconds()
         {
+            if (TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+                return Mathf.Max(0.05f, combatStats.GetSwingTimeSeconds());
+
             // Defensive floor so we never end up with 0 or negative wait times.
             return Mathf.Max(0.05f, baseSwingTimeSeconds);
         }

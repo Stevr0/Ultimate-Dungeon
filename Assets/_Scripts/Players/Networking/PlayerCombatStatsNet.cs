@@ -39,6 +39,9 @@ namespace UltimateDungeon.Players.Networking
         [Tooltip("Equipment source (server authoritative).")]
         [SerializeField] private UltimateDungeon.Items.PlayerEquipmentComponent equipment;
 
+        [Tooltip("Authoritative combat stats aggregator (server-only).")]
+        [SerializeField] private UltimateDungeon.Players.PlayerCombatStatsServer combatStatsServer;
+
         [Tooltip("Optional: player core for future aggregator hooks.")]
         [SerializeField] private UltimateDungeon.Players.PlayerCore playerCore;
 
@@ -181,6 +184,9 @@ namespace UltimateDungeon.Players.Networking
 
             if (playerCore == null)
                 playerCore = GetComponentInChildren<UltimateDungeon.Players.PlayerCore>(true);
+
+            if (combatStatsServer == null)
+                combatStatsServer = GetComponentInChildren<UltimateDungeon.Players.PlayerCombatStatsServer>(true);
         }
 
         public override void OnNetworkSpawn()
@@ -189,6 +195,9 @@ namespace UltimateDungeon.Players.Networking
 
             if (equipment == null)
                 equipment = GetComponentInChildren<UltimateDungeon.Items.PlayerEquipmentComponent>(true);
+
+            if (combatStatsServer == null)
+                combatStatsServer = GetComponentInChildren<UltimateDungeon.Players.PlayerCombatStatsServer>(true);
 
             if (IsServer)
             {
@@ -257,105 +266,50 @@ namespace UltimateDungeon.Players.Networking
         /// </summary>
         private CombatSnapshot BuildSnapshotFromCurrentState()
         {
-            var snapshot = new CombatSnapshot
+            var fallback = new CombatSnapshot
             {
-                // Default gates (until StatusEffectSystem exists).
                 CanAttack = true,
                 CanCast = true,
                 CanMove = true,
                 CanBandage = true,
 
-                // Unarmed baseline (from PLAYER_COMBAT_STATS.md design doc).
                 WeaponName = new FixedString64Bytes("Unarmed"),
                 WeaponMinDamage = 1,
                 WeaponMaxDamage = 4,
-                WeaponSwingSpeedSeconds = 2.0f,
+                WeaponSwingSpeedSeconds = 2.0f
             };
 
-            if (equipment == null || !IsServer)
-                return snapshot;
+            if (!IsServer)
+                return fallback;
 
-            float hciPercentTotal = 0f;
-            float dciPercentTotal = 0f;
-            float diPercentTotal = 0f;
-
-            int resistPhysical = 0;
-            int resistFire = 0;
-            int resistCold = 0;
-            int resistPoison = 0;
-            int resistEnergy = 0;
-
-            foreach (UltimateDungeon.Items.EquipSlot slot in System.Enum.GetValues(typeof(UltimateDungeon.Items.EquipSlot)))
+            if (combatStatsServer != null)
             {
-                if (slot == UltimateDungeon.Items.EquipSlot.None)
-                    continue;
-
-                if (!equipment.TryGetEquippedItem(slot, out var instance, out var def))
-                    continue;
-
-                if (def != null)
+                var stats = combatStatsServer.Snapshot;
+                return new CombatSnapshot
                 {
-                    resistPhysical += def.armor.resistPhysical;
-                    resistFire += def.armor.resistFire;
-                    resistCold += def.armor.resistCold;
-                    resistPoison += def.armor.resistPoison;
-                    resistEnergy += def.armor.resistEnergy;
+                    ResistPhysical = stats.ResistPhysical,
+                    ResistFire = stats.ResistFire,
+                    ResistCold = stats.ResistCold,
+                    ResistPoison = stats.ResistPoison,
+                    ResistEnergy = stats.ResistEnergy,
 
-                    if (slot == UltimateDungeon.Items.EquipSlot.Mainhand && def.family == UltimateDungeon.Items.ItemFamily.Mainhand)
-                    {
-                        snapshot.WeaponName = new FixedString64Bytes(def.displayName);
-                        snapshot.WeaponMinDamage = def.weapon.minDamage;
-                        snapshot.WeaponMaxDamage = def.weapon.maxDamage;
-                        snapshot.WeaponSwingSpeedSeconds = def.weapon.swingSpeedSeconds;
-                    }
-                }
+                    AttackerHciPct = stats.AttackerHciPct,
+                    DefenderDciPct = stats.DefenderDciPct,
+                    DamageIncreasePct = stats.DamageIncreasePct,
 
-                if (instance != null && instance.affixes != null)
-                {
-                    foreach (var affix in instance.affixes)
-                    {
-                        switch (affix.id)
-                        {
-                            case UltimateDungeon.Items.AffixId.Combat_HitChance:
-                                hciPercentTotal += affix.magnitude;
-                                break;
-                            case UltimateDungeon.Items.AffixId.Combat_DefenseChance:
-                                dciPercentTotal += affix.magnitude;
-                                break;
-                            case UltimateDungeon.Items.AffixId.Combat_DamageIncrease:
-                                diPercentTotal += affix.magnitude;
-                                break;
-                            case UltimateDungeon.Items.AffixId.Resist_Physical:
-                                resistPhysical += Mathf.RoundToInt(affix.magnitude);
-                                break;
-                            case UltimateDungeon.Items.AffixId.Resist_Fire:
-                                resistFire += Mathf.RoundToInt(affix.magnitude);
-                                break;
-                            case UltimateDungeon.Items.AffixId.Resist_Cold:
-                                resistCold += Mathf.RoundToInt(affix.magnitude);
-                                break;
-                            case UltimateDungeon.Items.AffixId.Resist_Poison:
-                                resistPoison += Mathf.RoundToInt(affix.magnitude);
-                                break;
-                            case UltimateDungeon.Items.AffixId.Resist_Energy:
-                                resistEnergy += Mathf.RoundToInt(affix.magnitude);
-                                break;
-                        }
-                    }
-                }
+                    CanAttack = stats.CanAttack,
+                    CanCast = stats.CanCast,
+                    CanMove = stats.CanMove,
+                    CanBandage = stats.CanBandage,
+
+                    WeaponName = new FixedString64Bytes(string.IsNullOrWhiteSpace(stats.WeaponName) ? "Unarmed" : stats.WeaponName),
+                    WeaponMinDamage = stats.WeaponMinDamage,
+                    WeaponMaxDamage = stats.WeaponMaxDamage,
+                    WeaponSwingSpeedSeconds = stats.WeaponSwingSpeedSeconds
+                };
             }
 
-            snapshot.ResistPhysical = resistPhysical;
-            snapshot.ResistFire = resistFire;
-            snapshot.ResistCold = resistCold;
-            snapshot.ResistPoison = resistPoison;
-            snapshot.ResistEnergy = resistEnergy;
-
-            snapshot.AttackerHciPct = hciPercentTotal * 0.01f;
-            snapshot.DefenderDciPct = dciPercentTotal * 0.01f;
-            snapshot.DamageIncreasePct = diPercentTotal * 0.01f;
-
-            return snapshot;
+            return fallback;
         }
 
         // --------------------------------------------------------------------

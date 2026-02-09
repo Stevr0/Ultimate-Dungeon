@@ -91,11 +91,27 @@ namespace UltimateDungeon.Combat
             // -------------------------
             // Build DamagePacket (v0.1)
             // -------------------------
+            int finalDamage = DEBUG_FIXED_DAMAGE;
+            DamageType damageType = DamageType.Physical;
+
+            if (attacker is Component attackerComponent &&
+                attackerComponent.TryGetComponent(out UltimateDungeon.Players.PlayerCombatStatsServer combatStats))
+            {
+                var range = combatStats.GetWeaponMinMaxDamage();
+                int minDamage = Mathf.Max(0, range.Min);
+                int maxDamage = Mathf.Max(minDamage, range.Max);
+                int baseDamage = (minDamage + maxDamage) / 2;
+
+                float damageIncrease = combatStats.GetDamageIncreasePct();
+                finalDamage = Mathf.Max(0, Mathf.RoundToInt(baseDamage * (1f + damageIncrease)));
+                damageType = combatStats.GetWeaponDamageType();
+            }
+
             DamagePacket packet = DamagePacket.CreateWeaponHit(
                 attacker.NetId,
                 target.NetId,
-                DEBUG_FIXED_DAMAGE,
-                DamageType.Physical
+                finalDamage,
+                damageType
             );
 
             // Apply damage (server)
