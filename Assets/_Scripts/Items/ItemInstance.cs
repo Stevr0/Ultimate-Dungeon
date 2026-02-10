@@ -309,12 +309,45 @@ namespace UltimateDungeon.Items
             instanceId = Guid.NewGuid().ToString("N");
         }
 
+        /// <summary>
+        /// Backward-compatible clone helper.
+        /// NOTE: This now creates a NEW identity to avoid duplicate instance IDs when cloning.
+        /// Use DeepClonePreserveIdentity when transferring the same item entity.
+        /// </summary>
         public ItemInstance DeepClone()
         {
-            var clone = new ItemInstance
+            return DeepCloneNewIdentity();
+        }
+
+        /// <summary>
+        /// Clones runtime fields while preserving the same instance identity.
+        /// Use only when representing the same item entity in another container/view.
+        /// </summary>
+        public ItemInstance DeepClonePreserveIdentity()
+        {
+            var clone = CreateCloneCore();
+            clone.instanceId = instanceId;
+            clone.EnsureInstanceId();
+            return clone;
+        }
+
+        /// <summary>
+        /// Clones runtime fields and assigns a brand-new identity.
+        /// Use for true item duplication semantics like stack split.
+        /// </summary>
+        public ItemInstance DeepCloneNewIdentity()
+        {
+            var clone = CreateCloneCore();
+            clone.instanceId = null;
+            clone.EnsureInstanceId();
+            return clone;
+        }
+
+        private ItemInstance CreateCloneCore()
+        {
+            return new ItemInstance
             {
                 itemDefId = itemDefId,
-                instanceId = instanceId,
                 stackCount = stackCount,
                 durabilityCurrent = durabilityCurrent,
                 durabilityMax = durabilityMax,
@@ -324,9 +357,6 @@ namespace UltimateDungeon.Items
                     ? new List<GrantedAbilitySelection>(grantedAbilitySelections)
                     : new List<GrantedAbilitySelection>()
             };
-
-            clone.EnsureInstanceId();
-            return clone;
         }
 
         /// <summary>

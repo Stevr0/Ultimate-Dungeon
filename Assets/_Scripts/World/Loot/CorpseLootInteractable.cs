@@ -198,11 +198,9 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
 
     private static bool IsLootAllowedInCurrentScene()
     {
-        if (!SceneRuleRegistry.HasCurrent)
-            return true;
-
-        var rules = SceneRuleRegistry.Current;
-        return (rules.Flags & SceneRuleFlags.ResourceGatheringAllowed) != 0;
+        // TODO: Wire this to a dedicated loot/inventory interaction scene gate when one exists.
+        // ResourceGatheringAllowed is not semantically correct for corpse looting.
+        return true;
     }
 
     private void SendSnapshotToClient(ulong clientId)
