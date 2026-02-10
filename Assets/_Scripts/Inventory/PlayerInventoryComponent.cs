@@ -1,16 +1,4 @@
-// ============================================================================
-// PlayerInventoryComponent.cs — v2 (UI drag/drop RPC)
-// ----------------------------------------------------------------------------
-// Adds client->server requests for inventory rearranging.
-//
-// New client API:
-// - RequestMoveOrSwap(fromSlot, toSlot)
-//
-// Server enforcement:
-// - Only server mutates InventoryRuntimeModel.
-// - Only the owning client can request moves.
-// ============================================================================
-
+using System;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -20,7 +8,6 @@ namespace UltimateDungeon.Items
     public sealed class PlayerInventoryComponent : NetworkBehaviour
     {
         [Header("Required")]
-        [Tooltip("ItemDefCatalog asset with all ItemDefs.")]
         [SerializeField] private ItemDefCatalog itemDefCatalog;
 
         [Header("Inventory")]
@@ -34,21 +21,27 @@ namespace UltimateDungeon.Items
         {
             base.OnNetworkSpawn();
             _inventory = new InventoryRuntimeModel(slotCount);
+
+            if (IsServer)
+            {
+                LoadFromPersistenceServer();
+                _inventory.NotifyFullRefresh();
+            }
         }
 
-        // --------------------------------------------------------------------
-        // Client-side requests (UI)
-        // --------------------------------------------------------------------
+        public override void OnNetworkDespawn()
+        {
+            if (IsServer)
+                ServerPersistNow();
 
-        /// <summary>
-        /// Called by UI when user drops an inventory item onto another slot.
-        /// </summary>
+            base.OnNetworkDespawn();
+        }
+
         public void RequestMoveOrSwap(int fromSlot, int toSlot)
         {
             if (!IsOwner)
                 return;
 
-            // Client -> Server request.
             MoveOrSwapServerRpc(fromSlot, toSlot);
         }
 
@@ -58,12 +51,10 @@ namespace UltimateDungeon.Items
             if (!IsServer)
                 return;
 
-            ServerTryMoveOrSwap(fromSlot, toSlot);
+            var result = ServerTryMoveOrSwap(fromSlot, toSlot);
+            if (result == InventoryOpResult.Success)
+                ServerPersistNow();
         }
-
-        // --------------------------------------------------------------------
-        // Server-only API (gameplay systems)
-        // --------------------------------------------------------------------
 
         public InventoryOpResult ServerTryAdd(ItemInstance item, out int placedSlot)
         {
@@ -81,13 +72,13 @@ namespace UltimateDungeon.Items
                 return InventoryOpResult.UnknownItemDef;
             }
 
-            return _inventory.TryAdd(item, itemDefCatalog, out placedSlot);
+            var result = _inventory.TryAdd(item, itemDefCatalog, out placedSlot);
+            if (result == InventoryOpResult.Success)
+                ServerPersistNow();
+
+            return result;
         }
 
-        /// <summary>
-        /// Targeted placement into a specific empty slot (no auto-find).
-        /// Used by targeted unequip.
-        /// </summary>
         public InventoryOpResult ServerTryPlaceIntoEmptySlot(int toSlot, ItemInstance item)
         {
             if (!IsServer)
@@ -102,7 +93,11 @@ namespace UltimateDungeon.Items
                 return InventoryOpResult.UnknownItemDef;
             }
 
-            return _inventory.TryPlaceIntoEmptySlot(toSlot, item, itemDefCatalog);
+            var result = _inventory.TryPlaceIntoEmptySlot(toSlot, item, itemDefCatalog);
+            if (result == InventoryOpResult.Success)
+                ServerPersistNow();
+
+            return result;
         }
 
         public InventoryOpResult ServerTryMoveOrSwap(int fromSlot, int toSlot)
@@ -119,7 +114,11 @@ namespace UltimateDungeon.Items
                 return InventoryOpResult.UnknownItemDef;
             }
 
-            return _inventory.TryMoveOrSwap(fromSlot, toSlot, itemDefCatalog);
+            var result = _inventory.TryMoveOrSwap(fromSlot, toSlot, itemDefCatalog);
+            if (result == InventoryOpResult.Success)
+                ServerPersistNow();
+
+            return result;
         }
 
         public InventoryOpResult ServerTrySplit(int fromSlot, int toSlot, int splitAmount)
@@ -136,7 +135,11 @@ namespace UltimateDungeon.Items
                 return InventoryOpResult.UnknownItemDef;
             }
 
-            return _inventory.TrySplit(fromSlot, toSlot, splitAmount, itemDefCatalog);
+            var result = _inventory.TrySplit(fromSlot, toSlot, splitAmount, itemDefCatalog);
+            if (result == InventoryOpResult.Success)
+                ServerPersistNow();
+
+            return result;
         }
 
         public InventoryOpResult ServerTryRemoveAt(int slot, out ItemInstance removed)
@@ -149,7 +152,35 @@ namespace UltimateDungeon.Items
                 return InventoryOpResult.Failed;
             }
 
-            return _inventory.TryRemoveAt(slot, out removed);
+            var result = _inventory.TryRemoveAt(slot, out removed);
+            if (result == InventoryOpResult.Success)
+                ServerPersistNow();
+
+            return result;
+        }
+
+        public void ServerPersistNow()
+        {
+            if (!IsServer || _inventory == null)
+                return;
+
+            string accountId = ResolveAccountId();
+            var save = PlayerInventoryPersistence.BuildSaveData(accountId, OwnerClientId, _inventory);
+            PlayerInventoryPersistence.Save(save);
+        }
+
+        private void LoadFromPersistenceServer()
+        {
+            string accountId = ResolveAccountId();
+            if (!PlayerInventoryPersistence.TryLoad(accountId, out var save) || save == null)
+                return;
+
+            _inventory = PlayerInventoryPersistence.BuildRuntimeModel(save, slotCount, itemDefCatalog);
+        }
+
+        private string ResolveAccountId()
+        {
+            return $"Client_{OwnerClientId}";
         }
 
 #if UNITY_EDITOR

@@ -36,6 +36,12 @@ namespace UltimateDungeon.Items
         /// </summary>
         public string itemDefId;
 
+        /// <summary>
+        /// Unique runtime/persistence id for this instance.
+        /// Server assigns and keeps stable for save/load and loot transfer UI.
+        /// </summary>
+        public string instanceId;
+
         // --------------------------------------------------------------------
         // Stack state
         // --------------------------------------------------------------------
@@ -118,6 +124,7 @@ namespace UltimateDungeon.Items
         public ItemInstance(string itemDefId)
         {
             this.itemDefId = itemDefId;
+            EnsureInstanceId();
         }
 
         /// <summary>
@@ -130,6 +137,7 @@ namespace UltimateDungeon.Items
             if (def == null) throw new ArgumentNullException(nameof(def));
 
             itemDefId = def.itemDefId;
+            EnsureInstanceId();
 
             // Stack state
             stackCount = 1;
@@ -291,6 +299,34 @@ namespace UltimateDungeon.Items
 
             // Fallback: def default.
             return GetDefaultSpellIdFromDef(def, slot);
+        }
+
+        public void EnsureInstanceId()
+        {
+            if (!string.IsNullOrWhiteSpace(instanceId))
+                return;
+
+            instanceId = Guid.NewGuid().ToString("N");
+        }
+
+        public ItemInstance DeepClone()
+        {
+            var clone = new ItemInstance
+            {
+                itemDefId = itemDefId,
+                instanceId = instanceId,
+                stackCount = stackCount,
+                durabilityCurrent = durabilityCurrent,
+                durabilityMax = durabilityMax,
+                activeGrantSlot = activeGrantSlot,
+                affixes = affixes != null ? new List<AffixInstance>(affixes) : new List<AffixInstance>(),
+                grantedAbilitySelections = grantedAbilitySelections != null
+                    ? new List<GrantedAbilitySelection>(grantedAbilitySelections)
+                    : new List<GrantedAbilitySelection>()
+            };
+
+            clone.EnsureInstanceId();
+            return clone;
         }
 
         /// <summary>
