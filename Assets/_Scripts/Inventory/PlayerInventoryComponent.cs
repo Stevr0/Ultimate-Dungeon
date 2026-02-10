@@ -1,7 +1,7 @@
-using System;
-using System.Reflection;
 using Unity.Netcode;
 using UnityEngine;
+using UltimateDungeon.Networking;
+using UltimateDungeon.Players.Networking;
 
 namespace UltimateDungeon.Items
 {
@@ -198,68 +198,15 @@ namespace UltimateDungeon.Items
         {
             accountId = null;
 
-            // Current networking glue exposes player identity via PlayerNetIdentity.
-            // We read string IDs reflectively so this component can compile while auth fields
-            // are being iterated independently.
+            // PlayerNetIdentity now exposes server-authenticated AccountId directly.
             if (!TryGetComponent(out PlayerNetIdentity netIdentity) || netIdentity == null)
                 return false;
 
-            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            var candidateNames = new[] { "AccountId", "accountId", "NormalizedAccountId", "username", "UserName", "PlayerName" };
+            if (!netIdentity.HasAccountId)
+                return false;
 
-            Type identityType = typeof(PlayerNetIdentity);
-
-            foreach (string name in candidateNames)
-            {
-                var prop = identityType.GetProperty(name, Flags);
-                if (prop != null && prop.PropertyType == typeof(string))
-                {
-                    accountId = NormalizeAccountId(prop.GetValue(netIdentity) as string);
-                    if (!string.IsNullOrWhiteSpace(accountId))
-                        return true;
-                }
-            }
-
-            foreach (string name in candidateNames)
-            {
-                var field = identityType.GetField(name, Flags);
-                if (field != null && field.FieldType == typeof(string))
-                {
-                    accountId = NormalizeAccountId(field.GetValue(netIdentity) as string);
-                    if (!string.IsNullOrWhiteSpace(accountId))
-                        return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static string NormalizeAccountId(string raw)
-        {
-            if (string.IsNullOrWhiteSpace(raw))
-                return null;
-
-            string normalized = raw.Trim().ToLowerInvariant();
-            char[] invalidPathChars = System.IO.Path.GetInvalidFileNameChars();
-            var buffer = new char[normalized.Length];
-            int count = 0;
-
-            for (int i = 0; i < normalized.Length; i++)
-            {
-                char c = normalized[i];
-                if (Array.IndexOf(invalidPathChars, c) >= 0)
-                    continue;
-
-                if (char.IsWhiteSpace(c))
-                    c = '_';
-
-                buffer[count++] = c;
-            }
-
-            if (count == 0)
-                return null;
-
-            return new string(buffer, 0, count);
+            accountId = SessionAccountId.Normalize(netIdentity.AccountId);
+            return !string.IsNullOrWhiteSpace(accountId);
         }
 
 #if UNITY_EDITOR
