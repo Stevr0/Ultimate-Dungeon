@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // LocalPlayerUIBinder.cs (ActorVitals Only)
 // ----------------------------------------------------------------------------
 // Binds UI panels to the local player's replicated components.
@@ -7,11 +7,15 @@
 // - HUD vitals now bind ONLY to ActorVitals.
 // - This removes the "two vitals" problem.
 //
+// Fix:
+// - Adds the correct namespace import for PlayerNetIdentity.
+//
 // Store at:
-// Assets/Scripts/UI/Binding/LocalPlayerUIBinder.cs
+// Assets/_Scripts/UI/Binding/LocalPlayerUIBinder.cs
 // ============================================================================
 
 using UnityEngine;
+using UltimateDungeon.Players.Networking;
 
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -32,7 +36,12 @@ namespace UltimateDungeon.UI.Binding
 
         private void OnEnable()
         {
+            // Subscribe so we can bind whenever the local player spawns.
             PlayerNetIdentity.LocalPlayerSpawned += HandleLocalPlayerSpawned;
+
+            // Optional: if local already exists and UI enabled later, bind immediately.
+            if (PlayerNetIdentity.Local != null)
+                HandleLocalPlayerSpawned(PlayerNetIdentity.Local);
         }
 
         private void OnDisable()
@@ -77,9 +86,7 @@ namespace UltimateDungeon.UI.Binding
 #endif
 
             if (pressed)
-            {
                 characterStatsPanel.gameObject.SetActive(!characterStatsPanel.gameObject.activeSelf);
-            }
         }
 
         private void HandleLocalPlayerSpawned(PlayerNetIdentity identity)
@@ -94,9 +101,9 @@ namespace UltimateDungeon.UI.Binding
                 hudVitals.Bind(actorVitals);
 
             // 2) Stats panel
-            var statsNet = identity.GetComponentInChildren<UltimateDungeon.Players.Networking.PlayerStatsNet>(true);
-            var combatStatsNet = identity.GetComponentInChildren<UltimateDungeon.Players.Networking.PlayerCombatStatsNet>(true);
-            var skillBookNet = identity.GetComponentInChildren<UltimateDungeon.Players.Networking.PlayerSkillBookNet>(true);
+            var statsNet = identity.GetComponentInChildren<PlayerStatsNet>(true);
+            var combatStatsNet = identity.GetComponentInChildren<PlayerCombatStatsNet>(true);
+            var skillBookNet = identity.GetComponentInChildren<PlayerSkillBookNet>(true);
             var playerCore = identity.GetComponentInChildren<UltimateDungeon.Players.PlayerCore>(true);
 
             var statusRuntime = FindInterfaceInChildren<UltimateDungeon.StatusEffects.IStatusEffectRuntime>(identity);
@@ -120,6 +127,7 @@ namespace UltimateDungeon.UI.Binding
             if (root == null)
                 return null;
 
+            // We scan MonoBehaviours because interfaces are implemented by components.
             var behaviours = root.GetComponentsInChildren<MonoBehaviour>(true);
             for (int i = 0; i < behaviours.Length; i++)
             {
