@@ -24,12 +24,11 @@
 // - Once the API is locked, you can replace the reflection call with a strongly typed
 //   reference (recommended).
 //
-// Setup:
-// - Create a Panel prefab (right side of inventory is ideal).
-// - Wire the serialized fields below.
-// - (Optional) Drag your ItemGrantedAbilitiesPanelUI component into
-//   "Granted Abilities Panel".
-// - Panel starts hidden.
+// Fix:
+// - Adds the correct namespace import for PlayerNetIdentity.
+//
+// Store at:
+// Assets/_Scripts/UI/ItemDetails/ItemDetailsPanelUI.cs
 // ============================================================================
 
 using System;
@@ -42,6 +41,7 @@ using UltimateDungeon.Actors;
 using UltimateDungeon.Items;
 using UltimateDungeon.Spells;
 using UltimateDungeon.UI.Hotbar;
+using UltimateDungeon.Players.Networking;
 
 namespace UltimateDungeon.UI
 {
@@ -213,7 +213,6 @@ namespace UltimateDungeon.UI
             gameObject.SetActive(false);
         }
 
-
         // --------------------------------------------------------------------
         // Internal rendering
         // --------------------------------------------------------------------
@@ -257,9 +256,7 @@ namespace UltimateDungeon.UI
 
             RenderAffixes(instance);
 
-            // NEW: Hand off to the optional "granted abilities" panel.
-            // This is intentionally *UI-only*. It just passes the same def + instance
-            // the details panel is already using.
+            // Hand off to the optional "granted abilities" panel.
             RenderGrantedAbilitiesPanel(def, instance, equipmentSlot);
 
             UpdateActiveGrantSlotHighlight();
@@ -513,7 +510,6 @@ namespace UltimateDungeon.UI
             grantedAbilitiesPanelTyped.SetActiveGrantSlot(activeSlot);
         }
 
-
         private string BuildStatsBlock(ItemDef def)
         {
             // MVP: show a readable subset based on family
@@ -674,17 +670,12 @@ namespace UltimateDungeon.UI
             //
             // Expected signature:
             //   void MethodName(ItemDef def, ItemInstance instance)
-            //
-            // IMPORTANT:
-            // - Reflection is slower than direct calls, but this is UI and called only on clicks.
-            // - This keeps compilation stable while you iterate on the panel API.
             string[] methodNames = { "Bind", "Show", "SetItem", "Render" };
 
             Type type = panel.GetType();
 
             foreach (string name in methodNames)
             {
-                // Look for: (ItemDef, ItemInstance)
                 MethodInfo mi = type.GetMethod(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                     binder: null,
                     types: new[] { typeof(ItemDef), typeof(ItemInstance) },
@@ -705,7 +696,6 @@ namespace UltimateDungeon.UI
                 return; // First match wins.
             }
 
-            // If we got here, the panel exists but doesn't expose a compatible method.
             Debug.LogWarning(
                 $"[ItemDetailsPanelUI] Granted Abilities Panel '{type.Name}' is assigned, but no compatible method was found.\n" +
                 "Add one of: Bind/Show/SetItem/Render with signature (ItemDef, ItemInstance), or replace reflection with a typed call.");
