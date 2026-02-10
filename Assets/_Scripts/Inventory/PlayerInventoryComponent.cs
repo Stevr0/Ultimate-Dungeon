@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -180,7 +181,58 @@ namespace UltimateDungeon.Items
 
         private string ResolveAccountId()
         {
-            return $"Client_{OwnerClientId}";
+            // Prefer the server-authenticated account identity (normalized username).
+            // This keeps persistence keyed to the user account instead of a transport client id.
+            if (TryResolveAuthoritativeAccountId(out string accountId))
+                return accountId;
+
+            // Fallback for local/dev sessions where auth wiring is not present yet.
+            // Keep this loud so shipping with fallback-only identity is obvious.
+            string fallback = $"Client_{OwnerClientId}";
+            Debug.LogError($"[PlayerInventoryComponent] Missing authoritative AccountId for owner {OwnerClientId}. " +
+                           $"Falling back to '{fallback}'. Wire session/login AccountId on the player identity before shipping.");
+            return fallback;
+        }
+
+        private bool TryResolveAuthoritativeAccountId(out string accountId)
+        {
+            accountId = null;
+
+            // Current networking glue exposes player identity via PlayerNetIdentity.
+            // We read AccountId reflectively so this component can compile while auth fields
+            // are being iterated independently.
+            if (!TryGetComponent(out PlayerNetIdentity netIdentity) || netIdentity == null)
+                return false;
+
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+            var prop = typeof(PlayerNetIdentity).GetProperty("AccountId", Flags);
+            if (prop != null && prop.PropertyType == typeof(string))
+            {
+                accountId = NormalizeAccountId(prop.GetValue(netIdentity) as string);
+                if (!string.IsNullOrWhiteSpace(accountId))
+                    return true;
+            }
+
+            var field = typeof(PlayerNetIdentity).GetField("AccountId", Flags)
+                        ?? typeof(PlayerNetIdentity).GetField("accountId", Flags);
+            if (field != null && field.FieldType == typeof(string))
+            {
+                accountId = NormalizeAccountId(field.GetValue(netIdentity) as string);
+                if (!string.IsNullOrWhiteSpace(accountId))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static string NormalizeAccountId(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            string[] parts = raw.Trim().ToLowerInvariant().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length == 0 ? null : string.Join(" ", parts);
         }
 
 #if UNITY_EDITOR

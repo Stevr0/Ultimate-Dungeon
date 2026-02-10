@@ -102,17 +102,47 @@ namespace UltimateDungeon.Items
 
             string path = GetCharacterPath(save.accountId);
             string tmp = path + ".tmp";
+            string backup = path + ".bak";
 
             try
             {
                 string json = JsonUtility.ToJson(save, prettyPrint: true);
                 File.WriteAllText(tmp, json);
-                File.Copy(tmp, path, overwrite: true);
-                File.Delete(tmp);
+
+                // Safer atomic replace strategy:
+                // - existing target: replace in one operation when supported
+                // - missing target: move temp into place
+                if (File.Exists(path))
+                {
+                    File.Replace(tmp, path, backup, ignoreMetadataErrors: true);
+                    if (File.Exists(backup))
+                        File.Delete(backup);
+                }
+                else
+                {
+                    File.Move(tmp, path);
+                }
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[PlayerInventoryPersistence] Failed to save '{path}': {ex.Message}");
+            }
+            finally
+            {
+                // Best-effort cleanup if an exception interrupted replacement.
+                try
+                {
+                    if (File.Exists(tmp))
+                        File.Delete(tmp);
+                }
+                catch { }
+
+                try
+                {
+                    if (File.Exists(backup))
+                        File.Delete(backup);
+                }
+                catch { }
             }
         }
 

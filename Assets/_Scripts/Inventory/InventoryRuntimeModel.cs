@@ -1,5 +1,5 @@
 // ============================================================================
-// InventoryRuntimeModel.cs — v2
+// InventoryRuntimeModel.cs  v2
 // ----------------------------------------------------------------------------
 // Adds targeted placement API needed for:
 // - Equipment -> Inventory into a selected slot
@@ -213,13 +213,9 @@ namespace UltimateDungeon.Items
 
             src.stackCount -= splitAmount;
 
-            var split = new ItemInstance(src.itemDefId)
-            {
-                stackCount = splitAmount,
-                durabilityCurrent = src.durabilityCurrent,
-                durabilityMax = src.durabilityMax,
-                affixes = new List<AffixInstance>(src.affixes ?? new List<AffixInstance>())
-            };
+            // Split-off stack is a new item entity and must get a distinct instanceId.
+            var split = src.DeepCloneNewIdentity();
+            split.stackCount = splitAmount;
 
             _slots[fromSlot].item = src;
             _slots[toSlot].item = split;
