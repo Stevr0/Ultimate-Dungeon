@@ -1,34 +1,9 @@
-﻿// ============================================================================
-// CorpseLootInteractable.cs (SPIKE)
-// ----------------------------------------------------------------------------
-// Goal:
-// - Represent a dead monster's corpse as an interactable world object
-// - Allow a player to Interact() to loot items
-// - Transfer items server-authoritatively into the player's inventory
-// - Despawn the corpse when empty (v0.1: immediately after looting)
-//
-// Spike Goal:
-// - Enable Spawn → Kill → Loot vertical slice
-//
-// Success Criteria:
-// - Monster dies → corpse appears
-// - Player interacts → receives item
-// - Corpse despawns
-//
-// Delete When:
-// - Replaced by full Corpse / Loot / Persistence system
-//
-// Dependencies:
-// - IInteractable
-// - PlayerInventoryComponent
-// - InventoryRuntimeModel
-// - ItemInstance
-// ============================================================================
-
 using System;
 using System.Collections.Generic;
-using UltimateDungeon.Progression;
 using UltimateDungeon.Items;
+using UltimateDungeon.Progression;
+using UltimateDungeon.SceneRules;
+using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -43,36 +18,23 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
     [SerializeField] private float interactRange = 2.0f;
 
     [Header("Required")]
-    [Tooltip("ItemDefCatalog asset with all ItemDefs. Needed so the corpse can validate/stack items.")]
     [SerializeField] private ItemDefCatalog itemDefCatalog;
-
-    [Tooltip("Factory used to create server-authoritative ItemInstances.")]
     [SerializeField] private ItemInstanceFactory itemInstanceFactory;
 
-    [Header("Loot (DEBUG / SPIKE)")]
+    [Header("Loot")]
     [SerializeField] private int minDrops = 1;
     [SerializeField] private int maxDrops = 3;
-
-    [Tooltip("ItemDefIds to randomly pick from. Populate this list on the corpse prefab (e.g. 10–30 entries).")]
-    [SerializeField] private List<string> lootPoolItemDefIds = new List<string>();
-
-    [Tooltip("ItemDefId to seed into the corpse when spawned (fallback when loot pool is empty).")]
+    [SerializeField] private List<string> lootPoolItemDefIds = new();
     [SerializeField] private string debugItemDefId = "mainhand_sword_shortsword";
 
-    // Runtime-only inventory for the corpse
-    private InventoryRuntimeModel _inventory;
-
-    // --------------------------------------------------------------------
-    // IInteractable
-    // --------------------------------------------------------------------
+    private readonly List<ItemInstance> _loot = new();
 
     public string DisplayName => string.IsNullOrWhiteSpace(displayName) ? name : displayName;
     public float InteractRange => Mathf.Max(0.1f, interactRange);
     public ulong NetworkObjectId => NetworkObject.NetworkObjectId;
 
-    // --------------------------------------------------------------------
-    // Lifecycle
-    // --------------------------------------------------------------------
+    public static event Action<ulong, List<CorpseLootSnapshotEntry>> ClientLootSnapshotReceived;
+    public static event Action<ulong, LootTakeResultCode> ClientTakeItemResultReceived;
 
     public override void OnNetworkSpawn()
     {
@@ -81,19 +43,96 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         if (!IsServer)
             return;
 
-        int slotCount = Mathf.Max(1, maxDrops);
-        _inventory = new InventoryRuntimeModel(slotCount);
+        SeedLootServer();
+    }
 
-        // Validate we can resolve ItemDefs (required for stacking rules, etc.)
-        if (itemDefCatalog == null)
+    public void ServerInteract(NetworkBehaviour interactor)
+    {
+        if (!IsServer || interactor == null)
+            return;
+
+        if (!TryResolvePlayer(interactor, out var playerInventory, out var playerObject))
+            return;
+
+        if (!IsPlayerInRange(playerObject.transform.position))
+            return;
+
+        if (!IsLootAllowedInCurrentScene())
+            return;
+
+        SendSnapshotToClient(playerInventory.OwnerClientId);
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    public void RequestLootSnapshotServerRpc(ServerRpcParams rpcParams = default)
+    {
+        if (!IsServer)
+            return;
+
+        ulong senderClientId = rpcParams.Receive.SenderClientId;
+        if (!TryGetPlayerInventory(senderClientId, out _))
+            return;
+
+        SendSnapshotToClient(senderClientId);
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    public void RequestTakeItemServerRpc(FixedString64Bytes instanceId, ServerRpcParams rpcParams = default)
+    {
+        if (!IsServer)
+            return;
+
+        ulong senderClientId = rpcParams.Receive.SenderClientId;
+        if (!TryGetPlayerInventory(senderClientId, out var playerInventory))
         {
-            Debug.LogError("[CorpseLootInteractable] Missing ItemDefCatalog reference on corpse prefab.");
+            SendTakeItemResult(senderClientId, LootTakeResultCode.InvalidPlayer);
             return;
         }
 
-        if (itemInstanceFactory == null)
+        if (!IsPlayerInRange(playerInventory.transform.position))
         {
-            Debug.LogError("[CorpseLootInteractable] Missing ItemInstanceFactory reference on corpse prefab.");
+            SendTakeItemResult(senderClientId, LootTakeResultCode.OutOfRange);
+            return;
+        }
+
+        if (!IsLootAllowedInCurrentScene())
+        {
+            SendTakeItemResult(senderClientId, LootTakeResultCode.SceneRulesBlocked);
+            return;
+        }
+
+        int itemIndex = FindLootIndex(instanceId.ToString());
+        if (itemIndex < 0)
+        {
+            SendTakeItemResult(senderClientId, LootTakeResultCode.ItemNotFound);
+            return;
+        }
+
+        ItemInstance item = _loot[itemIndex];
+        var addResult = playerInventory.ServerTryAdd(item, out _);
+        if (addResult != InventoryOpResult.Success)
+        {
+            SendTakeItemResult(senderClientId, LootTakeResultCode.InventoryFull);
+            return;
+        }
+
+        _loot.RemoveAt(itemIndex);
+        playerInventory.ServerPersistNow();
+
+        SendTakeItemResult(senderClientId, LootTakeResultCode.Success);
+        SendSnapshotToClient(senderClientId);
+
+        if (_loot.Count == 0 && NetworkObject != null && NetworkObject.IsSpawned)
+            NetworkObject.Despawn(destroy: true);
+    }
+
+    private void SeedLootServer()
+    {
+        _loot.Clear();
+
+        if (itemDefCatalog == null || itemInstanceFactory == null)
+        {
+            Debug.LogError("[CorpseLootInteractable] Missing required references.");
             return;
         }
 
@@ -103,9 +142,8 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         int clampedMin = Mathf.Max(0, minDrops);
         int clampedMax = Mathf.Max(clampedMin, maxDrops);
         int dropCount = RangeInclusive(rng, clampedMin, clampedMax);
-        dropCount = Mathf.Clamp(dropCount, 0, clampedMax);
 
-        List<string> selectedItemDefIds = new List<string>(dropCount);
+        List<string> selectedItemDefIds = new(dropCount);
         if (lootPoolItemDefIds != null && lootPoolItemDefIds.Count > 0)
         {
             SelectLootFromPool(rng, lootPoolItemDefIds, dropCount, selectedItemDefIds);
@@ -114,86 +152,151 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         {
             selectedItemDefIds.Add(debugItemDefId);
         }
-        else
-        {
-            Debug.LogWarning("[CorpseLootInteractable] Loot pool is empty and no debug item is configured; corpse will spawn empty.");
-        }
 
         for (int i = 0; i < selectedItemDefIds.Count; i++)
         {
             string itemDefId = selectedItemDefIds[i];
             uint itemSeed = baseSeed + (uint)i * 1013904223u;
-            if (itemInstanceFactory.TryCreateLootItem(itemDefId, itemSeed, out var item))
-            {
-                var addResult = _inventory.TryAdd(item, itemDefCatalog, out _);
-                if (addResult != InventoryOpResult.Success)
-                {
-                    Debug.LogWarning($"[CorpseLootInteractable] Failed to seed loot '{itemDefId}': {addResult}");
-                }
-            }
-            else
-            {
-                Debug.LogWarning($"[CorpseLootInteractable] Failed to create loot item '{itemDefId}'.");
-            }
+            if (!itemInstanceFactory.TryCreateLootItem(itemDefId, itemSeed, out var item) || item == null)
+                continue;
+
+            item.EnsureInstanceId();
+            _loot.Add(item);
         }
     }
 
-
-    // --------------------------------------------------------------------
-    // Interaction
-    // --------------------------------------------------------------------
-
-    public void ServerInteract(NetworkBehaviour interactor)
+    private bool TryResolvePlayer(NetworkBehaviour interactor, out PlayerInventoryComponent playerInventory, out NetworkObject playerObject)
     {
-        if (!IsServer)
-            return;
+        playerInventory = null;
+        playerObject = null;
 
-        if (interactor == null)
-            return;
+        if (!interactor.TryGetComponent(out playerInventory))
+            return false;
 
-        if (_inventory == null)
+        playerObject = playerInventory.NetworkObject;
+        return playerObject != null;
+    }
+
+    private bool TryGetPlayerInventory(ulong clientId, out PlayerInventoryComponent inventory)
+    {
+        inventory = null;
+
+        if (NetworkManager == null)
+            return false;
+
+        if (!NetworkManager.ConnectedClients.TryGetValue(clientId, out var client) || client.PlayerObject == null)
+            return false;
+
+        return client.PlayerObject.TryGetComponent(out inventory);
+    }
+
+    private bool IsPlayerInRange(Vector3 playerPosition)
+    {
+        float sqrDistance = (playerPosition - transform.position).sqrMagnitude;
+        return sqrDistance <= InteractRange * InteractRange;
+    }
+
+    private static bool IsLootAllowedInCurrentScene()
+    {
+        if (!SceneRuleRegistry.HasCurrent)
+            return true;
+
+        var rules = SceneRuleRegistry.Current;
+        return (rules.Flags & SceneRuleFlags.ResourceGatheringAllowed) != 0;
+    }
+
+    private void SendSnapshotToClient(ulong clientId)
+    {
+        var snapshot = BuildSnapshot();
+        ReceiveLootSnapshotClientRpc(snapshot, new ClientRpcParams
         {
-            Debug.LogWarning("[CorpseLootInteractable] Corpse inventory is missing; aborting loot transfer.");
-            return;
-        }
+            Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
+        });
+    }
 
-        // We only allow players to loot
-        if (!interactor.TryGetComponent(out PlayerInventoryComponent playerInventory))
+    private LootSnapshotPayload BuildSnapshot()
+    {
+        var payload = new LootSnapshotPayload { Entries = new CorpseLootSnapshotEntry[_loot.Count] };
+
+        for (int i = 0; i < _loot.Count; i++)
         {
-            Debug.LogWarning("[CorpseLootInteractable] Interactor has no PlayerInventoryComponent.");
-            return;
-        }
+            ItemInstance item = _loot[i];
+            item.EnsureInstanceId();
 
-        // Transfer all items from corpse to player
-        for (int i = 0; i < _inventory.SlotCount; i++)
-        {
-            var slot = _inventory.GetSlot(i);
-            if (slot.IsEmpty || slot.item == null)
-                continue;
-
-            // Try to add to player inventory (PlayerInventoryComponent already validates ItemDefId)
-            var result = playerInventory.ServerTryAdd(slot.item, out _);
-            if (result == InventoryOpResult.Success)
+            string display = item.itemDefId;
+            string iconAddress = string.Empty;
+            if (itemDefCatalog != null && itemDefCatalog.TryGet(item.itemDefId, out var def) && def != null)
             {
-                _inventory.TryRemoveAt(i, out _);
+                display = string.IsNullOrWhiteSpace(def.displayName) ? item.itemDefId : def.displayName;
+                iconAddress = def.iconAddress ?? string.Empty;
             }
-            else
+
+            string affixSummary = BuildAffixSummary(item);
+            payload.Entries[i] = new CorpseLootSnapshotEntry
             {
-                // If the player's inventory is full (or item unknown), we keep the item in the corpse.
-                Debug.LogWarning($"[CorpseLootInteractable] Player inventory add failed: {result}");
-            }
+                InstanceId = new FixedString64Bytes(item.instanceId),
+                ItemDefId = new FixedString64Bytes(item.itemDefId ?? string.Empty),
+                DisplayName = new FixedString64Bytes(display),
+                IconAddress = new FixedString128Bytes(iconAddress),
+                StackCount = item.stackCount,
+                DurabilityCurrent = item.durabilityCurrent,
+                DurabilityMax = item.durabilityMax,
+                AffixSummary = new FixedString128Bytes(affixSummary)
+            };
         }
 
-        // v0.1: Despawn if empty, otherwise stay so the player can try again later.
-        bool anyRemaining = false;
-        for (int i = 0; i < _inventory.SlotCount; i++)
+        return payload;
+    }
+
+    private static string BuildAffixSummary(ItemInstance item)
+    {
+        if (item?.affixes == null || item.affixes.Count == 0)
+            return string.Empty;
+
+        int count = Mathf.Min(3, item.affixes.Count);
+        var names = new string[count];
+        for (int i = 0; i < count; i++)
+            names[i] = item.affixes[i].id.ToString();
+
+        return string.Join(", ", names);
+    }
+
+    private int FindLootIndex(string instanceId)
+    {
+        if (string.IsNullOrWhiteSpace(instanceId))
+            return -1;
+
+        for (int i = 0; i < _loot.Count; i++)
         {
-            var s = _inventory.GetSlot(i);
-            if (!s.IsEmpty && s.item != null) { anyRemaining = true; break; }
+            if (string.Equals(_loot[i].instanceId, instanceId, StringComparison.Ordinal))
+                return i;
         }
 
-        if (!anyRemaining)
-            NetworkObject.Despawn(destroy: true);
+        return -1;
+    }
+
+    private void SendTakeItemResult(ulong clientId, LootTakeResultCode code)
+    {
+        ReceiveTakeItemResultClientRpc((byte)code, new ClientRpcParams
+        {
+            Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
+        });
+    }
+
+    [ClientRpc]
+    private void ReceiveLootSnapshotClientRpc(LootSnapshotPayload payload, ClientRpcParams clientRpcParams = default)
+    {
+        var list = new List<CorpseLootSnapshotEntry>(payload.Entries?.Length ?? 0);
+        if (payload.Entries != null)
+            list.AddRange(payload.Entries);
+
+        ClientLootSnapshotReceived?.Invoke(NetworkObjectId, list);
+    }
+
+    [ClientRpc]
+    private void ReceiveTakeItemResultClientRpc(byte resultCode, ClientRpcParams clientRpcParams = default)
+    {
+        ClientTakeItemResultReceived?.Invoke(NetworkObjectId, (LootTakeResultCode)resultCode);
     }
 
     private static int RangeInclusive(DeterministicRng rng, int min, int max)
@@ -204,13 +307,9 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         return rng.NextInt(min, max + 1);
     }
 
-    private static void SelectLootFromPool(
-        DeterministicRng rng,
-        List<string> pool,
-        int dropCount,
-        List<string> results)
+    private static void SelectLootFromPool(DeterministicRng rng, List<string> pool, int dropCount, List<string> results)
     {
-        if (dropCount <= 0)
+        if (dropCount <= 0 || pool == null || pool.Count == 0)
             return;
 
         int poolCount = pool.Count;
@@ -238,10 +337,61 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         }
     }
 
-    #if UNITY_EDITOR
+#if UNITY_EDITOR
     private void OnValidate()
     {
         interactRange = Mathf.Max(0.1f, interactRange);
     }
 #endif
+}
+
+public enum LootTakeResultCode : byte
+{
+    Success = 0,
+    InvalidPlayer = 1,
+    OutOfRange = 2,
+    ItemNotFound = 3,
+    InventoryFull = 4,
+    SceneRulesBlocked = 5
+}
+
+public struct LootSnapshotPayload : INetworkSerializable
+{
+    public CorpseLootSnapshotEntry[] Entries;
+
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        int count = Entries?.Length ?? 0;
+        serializer.SerializeValue(ref count);
+
+        if (serializer.IsReader)
+            Entries = new CorpseLootSnapshotEntry[count];
+
+        for (int i = 0; i < count; i++)
+            serializer.SerializeValue(ref Entries[i]);
+    }
+}
+
+public struct CorpseLootSnapshotEntry : INetworkSerializable
+{
+    public FixedString64Bytes InstanceId;
+    public FixedString64Bytes ItemDefId;
+    public FixedString64Bytes DisplayName;
+    public FixedString128Bytes IconAddress;
+    public int StackCount;
+    public float DurabilityCurrent;
+    public float DurabilityMax;
+    public FixedString128Bytes AffixSummary;
+
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        serializer.SerializeValue(ref InstanceId);
+        serializer.SerializeValue(ref ItemDefId);
+        serializer.SerializeValue(ref DisplayName);
+        serializer.SerializeValue(ref IconAddress);
+        serializer.SerializeValue(ref StackCount);
+        serializer.SerializeValue(ref DurabilityCurrent);
+        serializer.SerializeValue(ref DurabilityMax);
+        serializer.SerializeValue(ref AffixSummary);
+    }
 }
