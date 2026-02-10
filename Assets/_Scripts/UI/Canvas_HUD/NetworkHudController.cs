@@ -2,11 +2,12 @@ using TMPro;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.UI;
+using UltimateDungeon.Networking;
 
 /// <summary>
 /// NetworkHudController
 /// --------------------
-/// Tiny “day 1” UI controller for starting/stopping NGO.
+/// Tiny "day 1" UI controller for starting/stopping NGO.
 ///
 /// Why this exists:
 /// - You need a reliable, repeatable way to start Host/Client while iterating.
@@ -23,6 +24,11 @@ public class NetworkHudController : MonoBehaviour
     [SerializeField] private Button shutdownButton;
     [SerializeField] private TMP_Text statusText;
 
+    [Header("Connection Payload (MVP Login)")]
+    [SerializeField] private string username = "Player_Default";
+    [SerializeField] private string password = string.Empty;
+    [SerializeField] private string clientBuildId = "dev";
+
     private void Awake()
     {
         // Defensive checks so setup errors are obvious.
@@ -32,7 +38,7 @@ public class NetworkHudController : MonoBehaviour
         if (statusText == null) Debug.LogError("[NetworkHudController] Status Text not assigned.");
 
         // Wire up button click events.
-        // (We do this in code so you don’t have to add OnClick entries manually.)
+        // (We do this in code so you don't have to add OnClick entries manually.)
         if (hostButton != null) hostButton.onClick.AddListener(OnClickHost);
         if (clientButton != null) clientButton.onClick.AddListener(OnClickClient);
         if (shutdownButton != null) shutdownButton.onClick.AddListener(OnClickShutdown);
@@ -67,6 +73,11 @@ public class NetworkHudController : MonoBehaviour
             return;
         }
 
+        // Host includes local client login payload too, so host-player identity uses
+        // the same AccountId pipeline as remote clients.
+        nm.NetworkConfig.ConnectionData =
+            NetworkSessionApprovalBridge.BuildConnectionPayload(username, password, clientBuildId);
+
         // StartHost:
         // - Starts a server
         // - Also starts a local client
@@ -94,9 +105,13 @@ public class NetworkHudController : MonoBehaviour
             return;
         }
 
+        // Populate NGO connection payload with lightweight login/session data.
+        nm.NetworkConfig.ConnectionData =
+            NetworkSessionApprovalBridge.BuildConnectionPayload(username, password, clientBuildId);
+
         // StartClient:
         // - Connects to the configured address/port (UnityTransport)
-        // - Server will spawn this client’s player (if PlayerPrefab is set)
+        // - Server will spawn this client's player (if PlayerPrefab is set)
         bool started = nm.StartClient();
         Debug.Log(started
             ? "[NetworkHudController] Client started (attempting to connect)."
