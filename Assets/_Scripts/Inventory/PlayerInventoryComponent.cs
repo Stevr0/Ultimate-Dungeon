@@ -199,28 +199,36 @@ namespace UltimateDungeon.Items
             accountId = null;
 
             // Current networking glue exposes player identity via PlayerNetIdentity.
-            // We read AccountId reflectively so this component can compile while auth fields
+            // We read string IDs reflectively so this component can compile while auth fields
             // are being iterated independently.
             if (!TryGetComponent(out PlayerNetIdentity netIdentity) || netIdentity == null)
                 return false;
 
             const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var candidateNames = new[] { "AccountId", "accountId", "NormalizedAccountId", "username", "UserName", "PlayerName" };
 
-            var prop = typeof(PlayerNetIdentity).GetProperty("AccountId", Flags);
-            if (prop != null && prop.PropertyType == typeof(string))
+            Type identityType = typeof(PlayerNetIdentity);
+
+            foreach (string name in candidateNames)
             {
-                accountId = NormalizeAccountId(prop.GetValue(netIdentity) as string);
-                if (!string.IsNullOrWhiteSpace(accountId))
-                    return true;
+                var prop = identityType.GetProperty(name, Flags);
+                if (prop != null && prop.PropertyType == typeof(string))
+                {
+                    accountId = NormalizeAccountId(prop.GetValue(netIdentity) as string);
+                    if (!string.IsNullOrWhiteSpace(accountId))
+                        return true;
+                }
             }
 
-            var field = typeof(PlayerNetIdentity).GetField("AccountId", Flags)
-                        ?? typeof(PlayerNetIdentity).GetField("accountId", Flags);
-            if (field != null && field.FieldType == typeof(string))
+            foreach (string name in candidateNames)
             {
-                accountId = NormalizeAccountId(field.GetValue(netIdentity) as string);
-                if (!string.IsNullOrWhiteSpace(accountId))
-                    return true;
+                var field = identityType.GetField(name, Flags);
+                if (field != null && field.FieldType == typeof(string))
+                {
+                    accountId = NormalizeAccountId(field.GetValue(netIdentity) as string);
+                    if (!string.IsNullOrWhiteSpace(accountId))
+                        return true;
+                }
             }
 
             return false;
@@ -231,8 +239,27 @@ namespace UltimateDungeon.Items
             if (string.IsNullOrWhiteSpace(raw))
                 return null;
 
-            string[] parts = raw.Trim().ToLowerInvariant().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            return parts.Length == 0 ? null : string.Join(" ", parts);
+            string normalized = raw.Trim().ToLowerInvariant();
+            char[] invalidPathChars = System.IO.Path.GetInvalidFileNameChars();
+            var buffer = new char[normalized.Length];
+            int count = 0;
+
+            for (int i = 0; i < normalized.Length; i++)
+            {
+                char c = normalized[i];
+                if (Array.IndexOf(invalidPathChars, c) >= 0)
+                    continue;
+
+                if (char.IsWhiteSpace(c))
+                    c = '_';
+
+                buffer[count++] = c;
+            }
+
+            if (count == 0)
+                return null;
+
+            return new string(buffer, 0, count);
         }
 
 #if UNITY_EDITOR

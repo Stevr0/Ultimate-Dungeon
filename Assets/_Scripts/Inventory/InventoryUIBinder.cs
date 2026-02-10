@@ -137,7 +137,8 @@ namespace UltimateDungeon.UI
             // We only use it for UI details.
             _playerEquipment = FindEquipmentComponent(localPlayer);
 
-            _model.OnChanged += HandleInventoryChanged;
+            _model.OnFullRefresh -= HandleInventoryFullRefresh;
+            _model.OnFullRefresh += HandleInventoryFullRefresh;
 
             // Initial paint so you see already-seeded items.
             RefreshAllSlots();
@@ -146,7 +147,7 @@ namespace UltimateDungeon.UI
         private void Unbind()
         {
             if (_model != null)
-                _model.OnChanged -= HandleInventoryChanged;
+                _model.OnFullRefresh -= HandleInventoryFullRefresh;
 
             _invComponent = null;
             _model = null;
@@ -205,18 +206,12 @@ namespace UltimateDungeon.UI
         // UI refresh
         // --------------------------------------------------------------------
 
-        private void HandleInventoryChanged(InventoryChangeType changeType, int slotIndex)
+        private void HandleInventoryFullRefresh()
         {
             if (_model == null)
                 return;
 
-            if (changeType == InventoryChangeType.FullRefresh || slotIndex < 0)
-            {
-                RefreshAllSlots();
-                return;
-            }
-
-            RefreshSlot(slotIndex);
+            RefreshAllSlots();
         }
 
         private void RefreshAllSlots()
