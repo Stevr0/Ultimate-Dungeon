@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UltimateDungeon.Players;
+using UltimateDungeon.Players.Networking;
 
 /// <summary>
 /// TargetIndicatorFollower

@@ -1,214 +1,292 @@
-// ============================================================================
-// HotbarSpellIconBinder.cs
-// ----------------------------------------------------------------------------
-// UI-only binder that resolves the active spell per equipped item and paints
-// the hotbar slot icon using SpellDef.spellIcon.
-//
-// Fix:
-// - Adds the correct namespace import for PlayerNetIdentity.
-//
-// Notes:
-// - This script is UI-only; it never mutates gameplay state.
-// - It listens for the local player spawn event (PlayerNetIdentity.LocalPlayerSpawned)
-//   then binds to PlayerEquipmentComponent changes to keep icons fresh.
-// ============================================================================
-
+using System;
+using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
-using UltimateDungeon.Items;
-using UltimateDungeon.Spells;
-using UltimateDungeon.Players.Networking;
 
-namespace UltimateDungeon.UI.Hotbar
+namespace UltimateDungeon.Items
 {
-    [DisallowMultipleComponent]
-    public sealed class HotbarSpellIconBinder : MonoBehaviour
+    public static class PlayerInventoryPersistence
     {
-        [Header("References")]
-        [SerializeField] private HotbarUI hotbar;
-        [SerializeField] private ItemDefCatalog itemDefCatalog;
-        [SerializeField] private SpellDefCatalog spellCatalog;
+        private const string SavesRoot = "Saves/Accounts";
 
-        [Header("Fallbacks")]
-        [Tooltip("Optional placeholder icon when a SpellDef has no icon assigned.")]
-        [SerializeField] private Sprite fallbackIcon;
-
-        private PlayerEquipmentComponent _equipment;
-
-        private void OnEnable()
+        public static PlayerInventorySaveData BuildSaveData(string accountId, ulong ownerClientId, InventoryRuntimeModel runtime)
         {
-            // Bind when the local player is available.
-            PlayerNetIdentity.LocalPlayerSpawned += HandleLocalPlayerSpawned;
-
-            // Auto-find the hotbar if it wasn't wired in the inspector.
-            if (hotbar == null)
-                hotbar = FindFirstObjectByType<HotbarUI>(FindObjectsInactive.Include);
-
-            // If the local player already exists, bind immediately.
-            if (PlayerNetIdentity.Local != null)
-                HandleLocalPlayerSpawned(PlayerNetIdentity.Local);
-        }
-
-        private void OnDisable()
-        {
-            PlayerNetIdentity.LocalPlayerSpawned -= HandleLocalPlayerSpawned;
-            UnbindEquipment();
-        }
-
-        private void HandleLocalPlayerSpawned(PlayerNetIdentity identity)
-        {
-            if (identity == null)
-                return;
-
-            _equipment = identity.GetComponent<PlayerEquipmentComponent>();
-            if (_equipment == null)
+            var data = new PlayerInventorySaveData
             {
-                Debug.LogWarning("[HotbarSpellIconBinder] PlayerEquipmentComponent missing on local player.");
-                return;
-            }
-
-            BindEquipment();
-            RefreshAllSlots();
-        }
-
-        private void BindEquipment()
-        {
-            if (_equipment == null)
-                return;
-
-            // Prevent double-subscribe.
-            _equipment.OnEquipmentChanged -= HandleEquipmentChanged;
-            _equipment.OnEquipmentChanged += HandleEquipmentChanged;
-        }
-
-        private void UnbindEquipment()
-        {
-            if (_equipment == null)
-                return;
-
-            _equipment.OnEquipmentChanged -= HandleEquipmentChanged;
-            _equipment = null;
-        }
-
-        private void HandleEquipmentChanged()
-        {
-            RefreshAllSlots();
-        }
-
-        /// <summary>
-        /// UI-only refresh for all hotbar slots.
-        /// </summary>
-        public void RefreshAllSlots()
-        {
-            if (hotbar == null)
-                return;
-
-            for (int i = 0; i < HotbarUI.SlotCount; i++)
-                RefreshSlotByHotbarIndex(i);
-        }
-
-        /// <summary>
-        /// UI-only refresh for the hotbar slot mapped to a specific equipment slot.
-        /// </summary>
-        public void RefreshSlotForEquipmentSlot(EquipmentSlotId slotId)
-        {
-            if (hotbar == null)
-                return;
-
-            for (int i = 0; i < HotbarUI.SlotCount; i++)
-            {
-                // Hotbar index -> equipment slot
-                if (!PlayerHotbarAbilityController.TryMapHotbarIndexToEquipSlot(i, out var equipSlot))
-                    continue;
-
-                // equipment slot -> UI equipment slot id
-                if (!PlayerEquipmentComponent.TryMapEquipSlotToUiSlot(equipSlot, out var uiSlot))
-                    continue;
-
-                if (uiSlot != slotId)
-                    continue;
-
-                RefreshSlotByHotbarIndex(i);
-                return;
-            }
-        }
-
-        private void RefreshSlotByHotbarIndex(int hotbarIndex)
-        {
-            // If any dependency is missing, clear the UI slot to avoid stale icons.
-            if (hotbar == null || _equipment == null || itemDefCatalog == null || spellCatalog == null)
-            {
-                hotbar?.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            // Map hotbar index -> equipment slot.
-            if (!PlayerHotbarAbilityController.TryMapHotbarIndexToEquipSlot(hotbarIndex, out var equipSlot))
-            {
-                hotbar.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            // Map equipment slot -> UI equipment slot id.
-            if (!PlayerEquipmentComponent.TryMapEquipSlotToUiSlot(equipSlot, out var uiSlot))
-            {
-                hotbar.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            // Read equipped snapshot for UI.
-            var equipped = _equipment.GetEquippedForUI(uiSlot);
-            if (equipped.IsEmpty)
-            {
-                hotbar.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            // Optional debug trace.
-            Debug.Log(
-                $"[HotbarIcon] equip={equipSlot} active={(AbilityGrantSlot)equipped.activeGrantSlotForHotbar} " +
-                $"P={(SpellId)equipped.selectedSpellPrimary} S={(SpellId)equipped.selectedSpellSecondary} U={(SpellId)equipped.selectedSpellUtility}");
-
-            // Validate the item def exists.
-            if (!itemDefCatalog.TryGet(equipped.itemDefId.ToString(), out var itemDef) || itemDef == null)
-            {
-                hotbar.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            // Resolve which spell is currently active for the equipped item.
-            var activeSlot = (AbilityGrantSlot)equipped.activeGrantSlotForHotbar;
-            var spellId = ResolveSelectedSpell(equipped, activeSlot);
-            if (spellId == SpellId.None)
-            {
-                hotbar.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            // Resolve the spell def.
-            var spellDef = spellCatalog.Get(spellId);
-            if (spellDef == null)
-            {
-                hotbar.ClearSlot(hotbarIndex);
-                return;
-            }
-
-            // Spell icons are authored on SpellDef. Use a placeholder if missing.
-            var icon = spellDef.spellIcon != null ? spellDef.spellIcon : fallbackIcon;
-            hotbar.SetSlotIcon(hotbarIndex, icon);
-        }
-
-        private static SpellId ResolveSelectedSpell(EquippedSlotNet equipped, AbilityGrantSlot activeSlot)
-        {
-            // IMPORTANT:
-            // - EquippedSlotNet contains three selected spell fields (Primary/Secondary/Utility)
-            // - activeGrantSlotForHotbar chooses which one should be displayed.
-            return activeSlot switch
-            {
-                AbilityGrantSlot.Primary => (SpellId)equipped.selectedSpellPrimary,
-                AbilityGrantSlot.Secondary => (SpellId)equipped.selectedSpellSecondary,
-                AbilityGrantSlot.Utility => (SpellId)equipped.selectedSpellUtility,
-                _ => SpellId.None
+                accountId = accountId,
+                characterId = $"char_{ownerClientId}",
+                characterName = $"Player_{ownerClientId}",
+                createdAtUtc = DateTime.UtcNow.ToString("O"),
+                lastSeenAtUtc = DateTime.UtcNow.ToString("O"),
+                inventorySlots = runtime?.SlotCount ?? 0,
+                inventoryItems = new List<SavedInventoryEntry>()
             };
+
+            if (runtime == null)
+                return data;
+
+            for (int i = 0; i < runtime.SlotCount; i++)
+            {
+                var slot = runtime.GetSlot(i);
+                if (slot.IsEmpty || slot.item == null)
+                    continue;
+
+                data.inventoryItems.Add(new SavedInventoryEntry
+                {
+                    slotIndex = i,
+                    item = SavedItemInstance.FromRuntime(slot.item)
+                });
+            }
+
+            return data;
         }
+
+        public static InventoryRuntimeModel BuildRuntimeModel(PlayerInventorySaveData save, int defaultSlotCount, ItemDefCatalog catalog)
+        {
+            int slots = Mathf.Max(defaultSlotCount, save?.inventorySlots ?? defaultSlotCount);
+            var model = new InventoryRuntimeModel(slots);
+
+            if (save?.inventoryItems == null)
+                return model;
+
+            for (int i = 0; i < save.inventoryItems.Count; i++)
+            {
+                var entry = save.inventoryItems[i];
+                if (entry == null || entry.item == null)
+                    continue;
+
+                var item = entry.item.ToRuntime();
+                if (item == null)
+                    continue;
+
+                if (entry.slotIndex >= 0 && entry.slotIndex < model.SlotCount)
+                {
+                    model.TryPlaceIntoEmptySlot(entry.slotIndex, item, catalog);
+                }
+                else
+                {
+                    model.TryAdd(item, catalog, out _);
+                }
+            }
+
+            return model;
+        }
+
+        public static bool TryLoad(string accountId, out PlayerInventorySaveData save)
+        {
+            save = null;
+            string path = GetCharacterPath(accountId);
+            if (!File.Exists(path))
+                return false;
+
+            try
+            {
+                string json = File.ReadAllText(path);
+                save = JsonUtility.FromJson<PlayerInventorySaveData>(json);
+                return save != null;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[PlayerInventoryPersistence] Failed to load '{path}': {ex.Message}");
+                return false;
+            }
+        }
+
+        public static void Save(PlayerInventorySaveData save)
+        {
+            if (save == null || string.IsNullOrWhiteSpace(save.accountId))
+                return;
+
+            string dir = GetAccountDirectory(save.accountId);
+            Directory.CreateDirectory(dir);
+
+            string path = GetCharacterPath(save.accountId);
+            string tmp = path + ".tmp";
+            string backup = path + ".bak";
+
+            try
+            {
+                string json = JsonUtility.ToJson(save, prettyPrint: true);
+                File.WriteAllText(tmp, json);
+
+                // Safer atomic replace strategy:
+                // - existing target: replace in one operation when supported
+                // - missing target: move temp into place
+                if (File.Exists(path))
+                {
+                    File.Replace(tmp, path, backup, ignoreMetadataErrors: true);
+                    if (File.Exists(backup))
+                        File.Delete(backup);
+                }
+                else
+                {
+                    File.Move(tmp, path);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[PlayerInventoryPersistence] Failed to save '{path}': {ex.Message}");
+            }
+            finally
+            {
+                // Best-effort cleanup if an exception interrupted replacement.
+                try
+                {
+                    if (File.Exists(tmp))
+                        File.Delete(tmp);
+                }
+                catch { }
+
+                try
+                {
+                    if (File.Exists(backup))
+                        File.Delete(backup);
+                }
+                catch { }
+            }
+        }
+
+        private static string GetAccountDirectory(string accountId)
+        {
+            return Path.Combine(Application.persistentDataPath, SavesRoot, accountId);
+        }
+
+        private static string GetCharacterPath(string accountId)
+        {
+            return Path.Combine(GetAccountDirectory(accountId), "character.json");
+        }
+    }
+
+    [Serializable]
+    public sealed class PlayerInventorySaveData
+    {
+        public string accountId;
+        public string characterId;
+        public string characterName;
+        public string createdAtUtc;
+        public string lastSeenAtUtc;
+        public int inventorySlots;
+        public List<SavedInventoryEntry> inventoryItems;
+    }
+
+    [Serializable]
+    public sealed class SavedInventoryEntry
+    {
+        public int slotIndex;
+        public SavedItemInstance item;
+    }
+
+    [Serializable]
+    public sealed class SavedItemInstance
+    {
+        public string itemDefId;
+        public string instanceId;
+        public int stackCount;
+        public float durabilityCurrent;
+        public float durabilityMax;
+        public int activeGrantSlot;
+        public List<SavedAffixInstance> affixes;
+        public List<SavedGrantedAbilitySelection> grantedAbilitySelections;
+
+        public static SavedItemInstance FromRuntime(ItemInstance item)
+        {
+            var data = new SavedItemInstance
+            {
+                itemDefId = item.itemDefId,
+                instanceId = item.instanceId,
+                stackCount = item.stackCount,
+                durabilityCurrent = item.durabilityCurrent,
+                durabilityMax = item.durabilityMax,
+                activeGrantSlot = (int)item.activeGrantSlot,
+                affixes = new List<SavedAffixInstance>(),
+                grantedAbilitySelections = new List<SavedGrantedAbilitySelection>()
+            };
+
+            if (item.affixes != null)
+            {
+                for (int i = 0; i < item.affixes.Count; i++)
+                {
+                    data.affixes.Add(new SavedAffixInstance
+                    {
+                        id = item.affixes[i].id.ToString(),
+                        magnitude = item.affixes[i].magnitude
+                    });
+                }
+            }
+
+            if (item.grantedAbilitySelections != null)
+            {
+                for (int i = 0; i < item.grantedAbilitySelections.Count; i++)
+                {
+                    data.grantedAbilitySelections.Add(new SavedGrantedAbilitySelection
+                    {
+                        slot = (int)item.grantedAbilitySelections[i].slot,
+                        spellId = item.grantedAbilitySelections[i].spellId.ToString()
+                    });
+                }
+            }
+
+            return data;
+        }
+
+        public ItemInstance ToRuntime()
+        {
+            if (string.IsNullOrWhiteSpace(itemDefId))
+                return null;
+
+            var runtime = new ItemInstance(itemDefId)
+            {
+                instanceId = instanceId,
+                stackCount = Mathf.Max(1, stackCount),
+                durabilityCurrent = durabilityCurrent,
+                durabilityMax = durabilityMax,
+                activeGrantSlot = (AbilityGrantSlot)Mathf.Max(0, activeGrantSlot),
+                affixes = new List<AffixInstance>(),
+                grantedAbilitySelections = new List<GrantedAbilitySelection>()
+            };
+
+            if (affixes != null)
+            {
+                for (int i = 0; i < affixes.Count; i++)
+                {
+                    if (!Enum.TryParse(affixes[i].id, out AffixId parsedAffix))
+                        continue;
+
+                    runtime.affixes.Add(new AffixInstance(parsedAffix, affixes[i].magnitude));
+                }
+            }
+
+            if (grantedAbilitySelections != null)
+            {
+                for (int i = 0; i < grantedAbilitySelections.Count; i++)
+                {
+                    if (!Enum.TryParse(grantedAbilitySelections[i].spellId, out UltimateDungeon.Spells.SpellId parsedSpell))
+                        parsedSpell = UltimateDungeon.Spells.SpellId.None;
+
+                    runtime.grantedAbilitySelections.Add(new GrantedAbilitySelection
+                    {
+                        slot = (AbilityGrantSlot)Mathf.Max(0, grantedAbilitySelections[i].slot),
+                        spellId = parsedSpell
+                    });
+                }
+            }
+
+            runtime.EnsureInstanceId();
+            return runtime;
+        }
+    }
+
+    [Serializable]
+    public sealed class SavedAffixInstance
+    {
+        public string id;
+        public float magnitude;
+    }
+
+    [Serializable]
+    public sealed class SavedGrantedAbilitySelection
+    {
+        public int slot;
+        public string spellId;
     }
 }
