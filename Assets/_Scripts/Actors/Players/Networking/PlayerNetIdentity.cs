@@ -2,6 +2,9 @@ using System;
 using Unity.Netcode;
 using UnityEngine;
 
+namespace UltimateDungeon.Players.Networking
+{
+
 /// <summary>
 /// PlayerNetIdentity
 /// -----------------
@@ -35,6 +38,10 @@ public class PlayerNetIdentity : NetworkBehaviour
     /// Useful for quick access, but prefer events for binding.
     /// </summary>
     public static PlayerNetIdentity Local { get; private set; }
+
+    // Compatibility glue for existing UI/camera binders that listen for
+    // local-player availability. Guarded so we don't double-raise per spawn.
+    private bool _raisedLocalSpawned;
 
     // --------------------------------------------------------------------
     // References
@@ -95,6 +102,11 @@ public class PlayerNetIdentity : NetworkBehaviour
         // Cache a reference for convenience.
         Local = this;
 
+        if (_raisedLocalSpawned)
+            return;
+
+        _raisedLocalSpawned = true;
+
         Debug.Log($"[PlayerNetIdentity] Local player spawned. OwnerClientId={OwnerClientId} NetId={NetworkObjectId}");
 
         // Fire the event so camera/UI systems can bind.
@@ -109,6 +121,8 @@ public class PlayerNetIdentity : NetworkBehaviour
         if (Local == this)
             Local = null;
 
+        _raisedLocalSpawned = false;
         _serverInitialized = false;
     }
+}
 }
