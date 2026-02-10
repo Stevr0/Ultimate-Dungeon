@@ -3,11 +3,20 @@
 // ----------------------------------------------------------------------------
 // UI-only binder that resolves the active spell per equipped item and paints
 // the hotbar slot icon using SpellDef.spellIcon.
+//
+// Fix:
+// - Adds the correct namespace import for PlayerNetIdentity.
+//
+// Notes:
+// - This script is UI-only; it never mutates gameplay state.
+// - It listens for the local player spawn event (PlayerNetIdentity.LocalPlayerSpawned)
+//   then binds to PlayerEquipmentComponent changes to keep icons fresh.
 // ============================================================================
 
 using UnityEngine;
 using UltimateDungeon.Items;
 using UltimateDungeon.Spells;
+using UltimateDungeon.Players.Networking;
 
 namespace UltimateDungeon.UI.Hotbar
 {
@@ -27,11 +36,14 @@ namespace UltimateDungeon.UI.Hotbar
 
         private void OnEnable()
         {
+            // Bind when the local player is available.
             PlayerNetIdentity.LocalPlayerSpawned += HandleLocalPlayerSpawned;
 
+            // Auto-find the hotbar if it wasn't wired in the inspector.
             if (hotbar == null)
                 hotbar = FindFirstObjectByType<HotbarUI>(FindObjectsInactive.Include);
 
+            // If the local player already exists, bind immediately.
             if (PlayerNetIdentity.Local != null)
                 HandleLocalPlayerSpawned(PlayerNetIdentity.Local);
         }
@@ -63,6 +75,7 @@ namespace UltimateDungeon.UI.Hotbar
             if (_equipment == null)
                 return;
 
+            // Prevent double-subscribe.
             _equipment.OnEquipmentChanged -= HandleEquipmentChanged;
             _equipment.OnEquipmentChanged += HandleEquipmentChanged;
         }
@@ -103,9 +116,11 @@ namespace UltimateDungeon.UI.Hotbar
 
             for (int i = 0; i < HotbarUI.SlotCount; i++)
             {
+                // Hotbar index -> equipment slot
                 if (!PlayerHotbarAbilityController.TryMapHotbarIndexToEquipSlot(i, out var equipSlot))
                     continue;
 
+                // equipment slot -> UI equipment slot id
                 if (!PlayerEquipmentComponent.TryMapEquipSlotToUiSlot(equipSlot, out var uiSlot))
                     continue;
 
@@ -119,24 +134,28 @@ namespace UltimateDungeon.UI.Hotbar
 
         private void RefreshSlotByHotbarIndex(int hotbarIndex)
         {
+            // If any dependency is missing, clear the UI slot to avoid stale icons.
             if (hotbar == null || _equipment == null || itemDefCatalog == null || spellCatalog == null)
             {
                 hotbar?.ClearSlot(hotbarIndex);
                 return;
             }
 
+            // Map hotbar index -> equipment slot.
             if (!PlayerHotbarAbilityController.TryMapHotbarIndexToEquipSlot(hotbarIndex, out var equipSlot))
             {
                 hotbar.ClearSlot(hotbarIndex);
                 return;
             }
 
+            // Map equipment slot -> UI equipment slot id.
             if (!PlayerEquipmentComponent.TryMapEquipSlotToUiSlot(equipSlot, out var uiSlot))
             {
                 hotbar.ClearSlot(hotbarIndex);
                 return;
             }
 
+            // Read equipped snapshot for UI.
             var equipped = _equipment.GetEquippedForUI(uiSlot);
             if (equipped.IsEmpty)
             {
@@ -144,12 +163,19 @@ namespace UltimateDungeon.UI.Hotbar
                 return;
             }
 
+            // Optional debug trace.
+            Debug.Log(
+                $"[HotbarIcon] equip={equipSlot} active={(AbilityGrantSlot)equipped.activeGrantSlotForHotbar} " +
+                $"P={(SpellId)equipped.selectedSpellPrimary} S={(SpellId)equipped.selectedSpellSecondary} U={(SpellId)equipped.selectedSpellUtility}");
+
+            // Validate the item def exists.
             if (!itemDefCatalog.TryGet(equipped.itemDefId.ToString(), out var itemDef) || itemDef == null)
             {
                 hotbar.ClearSlot(hotbarIndex);
                 return;
             }
 
+            // Resolve which spell is currently active for the equipped item.
             var activeSlot = (AbilityGrantSlot)equipped.activeGrantSlotForHotbar;
             var spellId = ResolveSelectedSpell(equipped, activeSlot);
             if (spellId == SpellId.None)
@@ -158,6 +184,7 @@ namespace UltimateDungeon.UI.Hotbar
                 return;
             }
 
+            // Resolve the spell def.
             var spellDef = spellCatalog.Get(spellId);
             if (spellDef == null)
             {
@@ -172,6 +199,9 @@ namespace UltimateDungeon.UI.Hotbar
 
         private static SpellId ResolveSelectedSpell(EquippedSlotNet equipped, AbilityGrantSlot activeSlot)
         {
+            // IMPORTANT:
+            // - EquippedSlotNet contains three selected spell fields (Primary/Secondary/Utility)
+            // - activeGrantSlotForHotbar chooses which one should be displayed.
             return activeSlot switch
             {
                 AbilityGrantSlot.Primary => (SpellId)equipped.selectedSpellPrimary,
