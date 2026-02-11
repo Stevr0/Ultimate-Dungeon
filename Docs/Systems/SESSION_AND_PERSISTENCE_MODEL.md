@@ -1,276 +1,260 @@
 # SESSION_AND_PERSISTENCE_MODEL.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 0.1  
-Last Updated: 2026-02-09  
+Version: 1.0  
+Last Updated: 2026-02-11  
 Engine: Unity 6 (URP)  
-Networking: Netcode for GameObjects (NGO)  
-Authority: Server-authoritative  
+Networking: Netcode for GameObjects (NGO) + **Steam Networking (Planned)**  
+Authority: **Shard Host is authoritative while connected** (trust-based MVP)  
 
 ---
 
 ## PURPOSE
 
-Defines the **minimum viable live-server flow** for friends connecting to a **Windows-hosted dedicated server**, including:
+Defines the authoritative model for:
+- Account identity & session establishment
+- Shard hosting lifecycle
+- Joining/leaving shards (visiting)
+- Character save/load flow for **single-character accounts**
+- Shard world persistence responsibilities
+- Crash/disconnect and recovery rules
 
-- Connection approval ("login")
-- Character identity + creation gate
-- Spawn/session lifecycle
-- Persistence rules (what is saved, when, and by whom)
+This model is aligned to:
+- `PLAYER_HOSTED_SHARDS_MODEL.md`
+- `HOUSING_RULES.md`
 
-This is the **single source of truth** for session/auth/persistence behavior.
+---
+
+## DESIGN SUMMARY (LOCKED)
+
+- Each account owns **exactly one character**
+- Players host **one public shard** (no passwords)
+- Characters may visit other shards
+- Dungeons run inside the owning shard
+- Steam is the planned transport/identity layer
+
+Persistence is split:
+- **Character persistence is player-owned** (travels with the player)
+- **World persistence is shard-owned** (lives with the host)
 
 ---
 
 ## SCOPE BOUNDARIES (NO OVERLAP)
 
 Owned elsewhere:
-- Combat legality + targeting: `ACTOR_MODEL.md`, `TARGETING_MODEL.md`
-- Combat math/execution: `COMBAT_CORE.md`
-- Item identity/instances: `ITEMS.md`, `ITEM_DEF_SCHEMA.md`, `ITEM_CATALOG.md`
-- Status definitions: `STATUS_EFFECT_CATALOG.md`
-- Scene-specific rules: `SCENE_RULE_PROVIDER.md`
+- Shard topology & discovery: `PLAYER_HOSTED_SHARDS_MODEL.md`
+- Housing placement legality: `HOUSING_RULES.md`, `SCENE_RULE_PROVIDER.md`
+- Combat, targeting, PvP legality: `COMBAT_CORE.md`, `TARGETING_MODEL.md`, `ACTOR_MODEL.md`
+- Item schemas: `ITEMS.md`, `ITEM_DEF_SCHEMA.md`
 
-This document **does not** define:
-- Specific combat math
-- Item schema fields
-- Spell payload rules
-
----
-
-## DESIGN GOALS
-
-- **Friends-only server**: simple, reliable, low-ops.
-- **Server is source of truth**: clients never author gameplay state.
-- **Deterministic ownership**: anything persistent is written by server only.
-- **Safe iteration**: allow future upgrade to stronger auth or database without rewriting gameplay.
+This document does **not** define:
+- UI layout (lobby screens, character screen)
+- Anti-cheat beyond the trust boundaries
+- Detailed save file schemas (only responsibilities and invariants)
 
 ---
 
-## TERMS
+## DEFINITIONS
 
-- **Server**: the dedicated authoritative instance (Windows PC initially).
-- **Client**: player build.
-- **AccountId**: stable identifier for a human user.
-- **CharacterId**: stable identifier for a character owned by an account.
-- **Session**: a connected client instance from connect → disconnect.
+### AccountId (LOCKED)
+A stable identity key for a player.
 
----
+- **Planned:** `AccountId = SteamId`.
+- Display name is cosmetic and may change.
 
-## AUTH / LOGIN MODEL (MVP)
+### Character (LOCKED)
+- Exactly **one** per account.
+- Persistent across shard visits.
 
-### 1) Login Inputs (Client)
-Client provides the following to the server at connect time:
+### Shard Host
+The player running the shard listen-server.
 
-- `username` (string)
-- `serverPassword` (string) — optional, but recommended for friends-only
-- `clientBuildId` (string) — required (see Version Gating)
+### Trust-Based MVP
+During a session:
+- The shard host is authoritative for gameplay simulation.
+- Character persistence is stored by the player client.
 
-### 2) Account Identity
-**MVP rule:** `AccountId = normalized(username)`.
-
-Normalization rules:
-- Trim whitespace
-- Lowercase
-- Collapse multiple spaces
-
-> **Design lock (MVP):** 1 account per username. No email/Steam/OAuth yet.
-
-### 3) Server Password
-If server password is enabled:
-- Connection is rejected when password mismatch.
-
-### 4) Version Gating
-Server maintains a single string:
-- `RequiredClientBuildId`
-
-Rules:
-- If `clientBuildId != RequiredClientBuildId` → reject connection.
-
-This prevents "it connects but everything is broken" when you ship a new build.
+> This avoids cross-shard fragmentation while keeping implementation feasible without cloud authority.
 
 ---
 
-## CHARACTER MODEL (MVP)
+## AUTHORITATIVE RESPONSIBILITY SPLIT (LOCKED)
 
-### 1) Character Slots
-**MVP rule:** 1 character per account.
+### While Connected to a Shard
+- **Shard host** is authoritative for:
+  - Movement, combat resolution, targeting legality
+  - Loot drops and world interactions
+  - Housing edits on that shard
+  - Any server-side validation gates
 
-(We can expand later to multiple characters per account, but persistence format should be written so it can support it.)
-
-### 2) Character Creation Fields (MVP)
-Required fields:
-- `CharacterName` (string)
-
-Optional fields (future):
-- appearance, gender, cosmetics
-
-### 3) Character Name Rules
-- Length: 3–16 characters (MVP)
-- Allowed characters: letters, numbers, spaces, apostrophe (MVP)
-- Must not be all spaces
-
-Uniqueness (MVP):
-- Unique **per server** (not just per account)
+### Persistence Ownership
+- **Player client** persists:
+  - Character save (stats/skills/inventory/equipment)
+- **Shard host** persists:
+  - Shard world save (village build state, vendors, world seed)
 
 ---
 
-## SESSION FLOW (CONNECT → PLAY)
+## SHARD HOSTING LIFECYCLE
 
-### Overview
-1) Client opens **Connect UI** and enters `username`, `password` (if enabled), `server address`, `port`.
-2) Client connects to server.
-3) Server performs **connection approval**.
-4) On success, server determines if this `AccountId` has a character save.
-5) If no character save exists → client enters **Character Creation UI**.
-6) Client submits `CharacterName`.
-7) Server validates name; on success creates Character + initial state.
-8) Server spawns the player actor and begins normal play.
+### Start Hosting
+When the host starts their shard:
+1. Load (or create) a `ShardProfile`
+2. If new shard:
+   - Generate `WorldSeed` (persisted)
+   - Create initial world state
+3. Start NGO host (listen-server)
+4. Register shard with Lobby via heartbeat
 
-### Connection Approval (Server)
-Server MUST reject connection if:
-- Password mismatch (when enabled)
-- BuildId mismatch
-- Username invalid (empty after normalization)
-- Account already logged in (MVP anti-dup)
-
-### Duplicate Login Rule (MVP)
-If the same `AccountId` is already connected:
-- Reject new connection.
-
-(Alternative policy later: kick old session, allow new.)
+### Stop Hosting
+When host stops hosting (quit/crash):
+- Lobby listing expires automatically
+- Visitors disconnect
+- Host must flush shard world state to disk
 
 ---
 
-## PERSISTENCE MODEL (MVP)
+## LOBBY DISCOVERY (SESSION METADATA)
 
-### 1) Authority
-**Design lock:** Only the server writes persistent data.
+The Lobby lists **active shards only**.
 
-Clients may REQUEST actions, but do not write saves.
+Shard advertisement contains (minimum):
+- `ShardSessionId`
+- `HostAccountId`
+- `ShardName`
+- `BuildId`
+- `WorldSeed`
+- `MaxPlayers`, `CurrentPlayers`
 
-### 2) Storage Type (MVP)
-**MVP storage:** JSON files on disk.
+No passwords. Shards are always public.
 
-Directory layout (recommended):
+---
+
+## JOIN FLOW (VISITING)
+
+1. Client selects a shard from Lobby.
+2. Client connects (Steam session → NGO connection).
+3. Shard host runs **connection approval**:
+   - BuildId mismatch → reject
+   - Duplicate login (same AccountId already connected) → reject
+   - Shard full → reject
+
+4. On accept, shard host requests the joining player’s **Character Snapshot**.
+5. Player provides the snapshot to the shard host.
+6. Shard host validates snapshot shape and applies server-side rules/caps.
+7. Player spawns.
+
+---
+
+## CHARACTER SNAPSHOT CONTRACT (LOCKED)
+
+### What the snapshot represents
+A portable, serialized representation of the single character:
+- Attributes / vitals
+- Skills
+- Inventory & equipped items
+- Active long-lived progress flags (if any)
+
+### Validation (MVP)
+Shard host must validate:
+- Required fields exist
+- IDs are valid (ItemId, SkillId, SpellId, StatusEffectId)
+- Values are within documented caps
+
+If validation fails, shard host must:
+- Reject the snapshot and deny entry, **or**
+- Sanitize to safe defaults (policy must be consistent)
+
+> Trust-based MVP assumes honest clients; validation is primarily for corruption prevention.
+
+---
+
+## SAVE EVENTS (LOCKED)
+
+Character persistence must be updated on:
+- **Leaving a shard normally** (disconnect / return to lobby)
+- **Entering a shard** (optional: immediate checkpoint after successful load)
+- **Death events** (if death changes inventory/state)
+- **Any inventory/equipment change** (recommended: debounce + periodic flush)
+
+Shard persistence must be updated on:
+- Housing edits (place/remove)
+- Vendor changes
+- Periodic world checkpoint
+- Host shutdown
+
+---
+
+## DISCONNECTS, CRASHES, AND RECOVERY
+
+### Visitor Disconnect
+- Shard host removes the player from the simulation.
+- If possible, shard host sends the latest Character Snapshot to the client.
+
+### Client Crash Mid-Session
+- Client may lose the last few seconds of character state.
+- Recovery rule (MVP):
+  - On next launch, the client loads the last locally committed Character Snapshot.
+
+### Host Crash
+- Shard goes offline immediately.
+- Visitors are disconnected.
+- Shard world recovery uses the last committed shard checkpoint.
+
+---
+
+## DIRECTORY LAYOUT (RECOMMENDED)
+
+### Character (Player-Owned)
 - `Saves/Accounts/<AccountId>/character.json`
-- `Saves/Accounts/<AccountId>/meta.json` (optional)
 
-### 3) What Must Be Saved (MVP)
-The server must persist enough state to rejoin after a restart.
+### Shard World (Host-Owned)
+- `Saves/Shards/<HostAccountId>/<ShardProfileId>/World/world.json`
+- `Saves/Shards/<HostAccountId>/<ShardProfileId>/Vendors/vendors.json` (optional split)
+- `Saves/Shards/<HostAccountId>/<ShardProfileId>/Permissions/perms.json` (optional split)
 
-Minimum required:
-
-**Identity**
-- AccountId
-- CharacterId
-- CharacterName
-- CreatedAt, LastSeenAt
-
-**Location**
-- SceneId (or SceneName)
-- Position (Vector3)
-- Rotation (Yaw or Quaternion)
-
-**Progression**
-- Base attributes (STR/DEX/INT) and any permanent advancement if applicable
-- Skill values (or skill progression state)
-- Currency wallet
-
-**Inventory / Equipment**
-- Inventory contents (ItemInstances)
-- Equipped slots (ItemInstances)
-- Item instance runtime fields that matter (e.g., durability, affixes, blessed/cursed state)
-
-**Statuses (MVP policy)**
-- Persistent/long-term statuses MAY be saved.
-- Short-lived combat statuses SHOULD NOT be saved unless explicitly marked persistent.
-
-> If a status effect requires persistence, it MUST declare itself "persistent" (owned by the status system), and persistence writes only those.
-
-### 4) What Must NOT Be Saved (MVP)
-- Transient combat state (current target, swing timers, cast timers)
-- Temporary buffs/debuffs unless flagged persistent
-- UI selections
-
-### 5) Save Triggers
-Server writes saves on:
-- **Disconnect** (always)
-- **Periodic autosave** (recommended: every 2–5 minutes)
-- **Critical events** (recommended):
-  - Item equip/unequip
-  - Item moved in/out of inventory
-  - Currency change
-
-### 6) Save Atomicity / Safety
-MVP file safety rules:
-- Write to `character.json.tmp`
-- Flush/close
-- Replace `character.json`
-
-This reduces corruption on crash.
-
-### 7) Load Rules
-On successful connect:
-- If save exists: load it and spawn
-- If save missing: require character creation
-- If save corrupt/unreadable:
-  - Move corrupt file aside with timestamp suffix
-  - Treat as missing (character creation) OR optionally fallback to last known good backup (future)
+`ShardProfileId` is stable locally so the host resumes the same world.
 
 ---
 
-## INITIAL CHARACTER STATE (MVP)
+## TRANSPORT RULE (LOCKED)
 
-When a new character is created, server assigns:
-
-- Spawn scene and spawn point (server-owned rule)
-- Starter kit (items/currency) as defined by item catalogs/rules
-
-This doc does not define starter items; that belongs in item catalogs/rules.
+- All items may be transported between shards **only via the character’s carried inventory**.
+- There is no bulk export, mail, remote transfer, or shard-level item pipeline.
 
 ---
 
-## UI REQUIREMENTS (MVP)
+## SECURITY / TRUST MODEL (MVP)
 
-### Connect Screen
-- Server Address
-- Port
-- Username
-- Password (optional)
-- Button: Connect
-- Error label (shows rejection reason)
+### What is trusted
+- The client-provided Character Snapshot is trusted enough to enable play.
 
-### Character Creation Screen
-- Character Name
-- Button: Create
-- Error label (invalid/duplicate)
+### What is not protected (MVP)
+- A malicious client can forge a snapshot.
+- A malicious host can grief visitors in-session.
 
-### Character Select Screen
-Not required for MVP (because 1 character per account).
+### Future Hardening (NOT LOCKED)
+- Cloud-authoritative character persistence
+- Snapshot signing / attestation
+- Official shards / verified PvP environments
 
 ---
 
-## SECURITY NOTES (MVP)
+## REQUIRED UPDATES TO DOCUMENTS_INDEX.md (PATCH)
 
-This is not "secure" against a determined attacker (no encryption/auth provider). It is acceptable for friends-only hosting.
-
-If/when the game goes public, upgrade path:
-- Real auth (Steam/UGS/Auth)
-- Transport security/encryption
-- Rate limiting and abuse controls
-
----
-
-## OPEN QUESTIONS (NOT LOCKED)
-
-1) Do we prefer "kick old session, accept new" for duplicate logins?
-2) Should character names be unique per server (current) or per account?
-3) Which statuses are persistent (we need a flag in status runtime/def)?
-4) Spawn policy: fixed town spawn vs last-known position vs safe fallback.
+Update the entry for `SESSION_AND_PERSISTENCE_MODEL.md` to reflect:
+- Steam identity/session join
+- Single-character global persistence
+- Shard-local world persistence
+- No passwords
 
 ---
 
-## CHANGELOG
+## DESIGN LOCK CONFIRMATION
 
-- v0.1 (2026-02-09): Initial authoritative session/login/persistence model for Windows-hosted friends server.
+This document is **authoritative**.
+
+Any change must:
+- Increment Version
+- Update Last Updated
+- Explicitly call out impacts to identity, persistence boundaries, or shard join/leave behavior
 
