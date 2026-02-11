@@ -1,203 +1,162 @@
 # SCENE_RULE_PROVIDER.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 0.1  
-Last Updated: 2026-01-29  
+Version: 1.0  
+Last Updated: 2026-02-11  
 Engine: Unity 6 (URP)  
-Networking: Netcode for GameObjects (NGO)  
-Authority: Server-authoritative  
+Authority: Server-authoritative (Shard Host)  
 
 ---
 
 ## PURPOSE
 
-Defines the authoritative runtime mechanism that exposes **SceneRuleContext** and **SceneRuleFlags** to all server systems.
+Defines the authoritative mechanism for declaring **SceneRuleContext** and **SceneRuleFlags** at runtime.
 
-This document exists to ensure:
-- Safe scenes can never accidentally allow combat
-- Every validation pipeline has one shared source of truth
-- Scene transitions clear illegal state (combat, selection, etc.) deterministically
+This document locks:
+- How each scene declares its rule context
+- How code queries scene legality gates
+- The canonical contexts used by the project
 
-This doc is the **implementation contract** between:
-- Scene loading / bootstrap
-- Actor legality
-- Targeting validation
-- Combat execution
-- Housing placement
+This document is the single source of truth for **“what rules apply in this scene?”**.
 
 ---
 
-## DEPENDENCIES (MUST ALIGN)
+## ALIGNMENT (LOCKED)
 
-- `ACTOR_MODEL.md`
-  - `SceneRuleContext`
-  - `SceneRuleFlags` table
-
-- `TARGETING_MODEL.md`
-  - Intent gating by scene
-
-- `COMBAT_CORE.md`
-  - Mandatory scene gate before scheduling and at resolution
-
-- `HOUSING_RULES.md`
-  - Housing allowed only in `MainlandHousing`
+This document is aligned to:
+- `ACTOR_MODEL.md` (scene contexts + legality gates)
+- `HOUSING_RULES.md` (Village-only construction)
+- `PLAYER_HOSTED_SHARDS_MODEL.md` (dungeons run on the shard host)
 
 ---
 
-## DESIGN LOCKS (MUST ENFORCE)
+## SCOPE BOUNDARIES (NO OVERLAP)
 
-1. **Server is source of truth**
-   - SceneRuleContext is decided by the server.
-   - Clients may display UI/camera changes, but cannot override rules.
+Owned elsewhere:
+- Actor legality & flags definition: `ACTOR_MODEL.md`
+- Housing permissions: `HOUSING_RULES.md`
+- Combat execution: `COMBAT_CORE.md`
 
-2. **Exactly one active SceneRuleContext per scene instance**
-   - No mixed contexts.
-
-3. **SceneRuleFlags are immutable during runtime**
-   - Once a scene is loaded and context selected, flags do not change until a scene transition.
-
-4. **All gameplay pipelines must consume SceneRuleFlags**
-   - Actor legality
-   - Targeting
-   - Combat Core
-   - Spellcasting damage/harm validation
-   - Housing placement
-
-5. **Scene transitions clear illegal state**
-   - Leaving a dungeon must clear combat scheduling and hostile state.
-   - Entering a safe scene must guarantee peaceful state.
+This document does **not** define:
+- How combat math works
+- How building placement UI works
+- Dungeon generation content
 
 ---
 
-## AUTHORITATIVE DATA
+## CANONICAL CONTEXTS (LOCKED)
 
-### SceneRuleContext (from ACTOR_MODEL.md)
-- `MainlandHousing`
-- `HotnowVillage`
+The project uses exactly these canonical contexts:
+
+- `ShardVillage`
+  - Safe social space
+  - **Building allowed** (permissions still apply)
+  - Vendors / economy
+
 - `Dungeon`
+  - Risk space
+  - **PvP enabled**
+  - Damage/death/durability/skill gain allowed
 
-### SceneRuleFlags (canonical set)
-- `CombatAllowed`
-- `DamageAllowed`
-- `DeathAllowed`
-- `DurabilityLossAllowed`
-- `ResourceGatheringAllowed`
-- `SkillGainAllowed`
-- `HostileActorsAllowed`
-- `PvPAllowed`
-
-> The canonical mapping from context → flags is defined in `ACTOR_MODEL.md`.
+> Note: Under the player-hosted shard model, `Dungeon` scenes run inside the owning player’s shard.
 
 ---
 
-## RUNTIME MODEL (LOCKED)
+## SCENE DECLARATION RULES (LOCKED)
 
-### SceneRuleProvider
-Each scene must contain exactly one provider object:
-
-- `SceneRuleProvider` (server authoritative component)
-  - Declares `SceneRuleContext`
-  - Exposes resolved `SceneRuleFlags`
-  - Provides a global access point for server systems
-
-**Rules**
-- If a scene loads without a provider, the server must fail fast (log error and prevent gameplay start).
-- If more than one provider exists, the server must fail fast.
+1. Every gameplay scene must declare **exactly one** `SceneRuleContext`.
+2. The declaration must be readable on the **server**.
+3. If the context cannot be resolved, the server must default to the safest option:
+   - `ShardVillage` (combat off, building off unless explicitly allowed)
 
 ---
 
-## ACCESS PATTERN (LOCKED)
+## PROVIDER PATTERN (AUTHORITATIVE)
 
-All runtime systems must access scene flags through a single path:
-
-- `SceneRuleRegistry.Current` *(server singleton created at scene boot)*
-  - holds the active `SceneRuleContext`
-  - holds the active `SceneRuleFlags`
-
-**No system is allowed** to hardcode safe/dungeon checks.
-
----
-
-## REQUIRED SERVER VALIDATION HOOKS (LOCKED)
-
-### Actor Legality
-- `AttackLegalityResolver` must refuse if `CombatAllowed == false`.
-
-### Targeting
-- `TargetIntentValidator` must refuse:
-  - `Attack` if `CombatAllowed == false`
-  - `CastHarmful` if `CombatAllowed == false`
-
-### Combat Core
-- Must refuse scheduling if `CombatAllowed == false`
-- Must re-gate at timer completion using flags
-
-### Spellcasting
-- Harmful spells must require `CombatAllowed == true`
-- Damage application must require `DamageAllowed == true`
-
-### Housing
-- Placement must require `SceneRuleContext == MainlandHousing`
-
----
-
-## SCENE TRANSITION RULES (LOCKED)
-
-When the server transitions a player between scenes:
-
-### Always clear
-- Current selection (target)
-- Any queued combat actions / swing timers
-- Any in-progress cast channel timers (if applicable)
-- Any combat state (`InCombat` → `Peaceful`)
-
-### Safe scene entry guarantee
-When entering `MainlandHousing` or `HotnowVillage`:
-- Player is forced to `CombatState.Peaceful`
-- Player cannot enter `InCombat` while in the scene
-
-### Dungeon entry guarantee
-When entering `Dungeon`:
-- Player starts `Peaceful`
-- Legality is determined normally
-
----
-
-## NETWORKING / CLIENT MIRROR (LOCKED)
-
-Clients must be informed of the current SceneRuleContext to drive:
-- Camera mode
-- UI gating (disable attack buttons, hide hostile reticles)
-- Tutorial/help messaging
-
-**Important:** Client UI is informational only.
-
-### Replicated payload (minimum)
+### SceneRuleProvider Component
+Each scene must contain a `SceneRuleProvider` (or equivalent singleton object) that declares:
 - `SceneRuleContext`
-- Optional: a compact bitmask of `SceneRuleFlags`
+- Optional overrides (if supported later)
+
+The provider is:
+- Read by server systems at runtime
+- Not trusted from clients
 
 ---
 
-## FAILURE MODES (LOCKED)
+## RULE FLAG RESOLUTION
 
-The server must treat these as critical configuration errors:
+The `SceneRuleContext` resolves into `SceneRuleFlags` as defined by `ACTOR_MODEL.md`.
 
-- Scene has no `SceneRuleProvider`
-- Scene has multiple `SceneRuleProvider` components
-- Provider references an unknown `SceneRuleContext`
+### Key invariants
+- If `CombatAllowed == false`, hostile intents must be rejected.
+- If `BuildingAllowed == false`, housing placement/removal intents must be rejected.
 
-Policy:
-- Log error
-- Prevent session start or kick players back to Hotnow Village
+**Important:**
+- `BuildingAllowed` means the *scene permits building*.
+- Who can build is enforced by `HOUSING_RULES.md` (Owner/CoOwner/Editor).
 
 ---
 
-## REQUIRED IMPLEMENTATION ARTIFACTS (NEXT)
+## HOUSING LEGALITY (LOCKED)
 
-1. `SceneRuleProvider` MonoBehaviour (server)
-2. `SceneRuleRegistry` singleton (server)
-3. Scene bootstrap validation (assert exactly one provider)
-4. Scene transition hook that clears illegal state
-5. Client mirror message (context only; flags optional)
+Housing/build placement is legal only when:
+
+1. `SceneRuleContext == ShardVillage`
+2. `BuildingAllowed == true`
+3. The actor has permission (Owner / CoOwner / Editor)
+
+Any code path that checks for older contexts such as `MainlandHousing` is **invalid**.
+
+---
+
+## DUNGEON LEGALITY (LOCKED)
+
+Dungeon scenes must declare:
+- `SceneRuleContext == Dungeon`
+
+Dungeon legality expectations:
+- `CombatAllowed == true`
+- `DamageAllowed == true`
+- `DeathAllowed == true`
+- `DurabilityLossAllowed == true`
+- `SkillGainAllowed == true`
+- `PvPAllowed == true`
+
+---
+
+## MULTI-SCENE / ADDITIVE LOADING
+
+When using additive scenes:
+- Exactly one loaded scene at a time must be designated as the **Primary Rule Source**.
+- The Primary Rule Source determines the current `SceneRuleContext`.
+
+Suggested approach (non-binding):
+- The server sets the Primary Rule Source when it completes a scene transition.
+
+If Primary Rule Source is ambiguous:
+- Default to `ShardVillage`.
+
+---
+
+## VALIDATION (RECOMMENDED)
+
+At server scene-load time, validate:
+- A provider exists
+- Context is one of the canonical values
+- The resolved flags match the expected template for that context
+
+On validation failure:
+- Log an error
+- Fall back to `ShardVillage`
+
+---
+
+## REQUIRED UPDATES TO DOCUMENTS_INDEX.md (PATCH)
+
+Update the entry for `SCENE_RULE_PROVIDER.md` to reflect:
+- Canonical contexts: `ShardVillage`, `Dungeon`
+- Housing legality tied to `ShardVillage`
+- Removal of `MainlandHousing` assumptions
 
 ---
 
@@ -208,5 +167,5 @@ This document is **authoritative**.
 Any change must:
 - Increment Version
 - Update Last Updated
-- Call out impacted dependent systems (Actor, Targeting, Combat, Housing, UI)
+- Explicitly call out impacts to scene legality gates, housing legality, or additive scene resolution
 
