@@ -1,10 +1,10 @@
 # ACTOR_MODEL.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 1.1  
-Last Updated: 2026-01-29  
+Version: 1.2  
+Last Updated: 2026-02-11  
 Engine: Unity 6 (URP)  
 Networking: Netcode for GameObjects (NGO)  
-Authority: Server-authoritative  
+Authority: Server-authoritative (Shard Host)  
 
 ---
 
@@ -19,7 +19,7 @@ An **Actor** is any runtime entity that can be:
 - (Optionally) damaged or killed
 
 **Combat Core never decides what an Actor is.**  
-Combat Core consumes Actors after **Actor rules** validate legality.
+Combat Core consumes Actors only after **Actor rules** validate legality.
 
 ---
 
@@ -28,17 +28,18 @@ Combat Core consumes Actors after **Actor rules** validate legality.
 ### This document owns
 - Actor identity and classification (`ActorType`)
 - Faction and relationship rules (`FactionId`, hostility / neutrality)
-- Targetability and interaction masks
-- **SceneRuleContext**: what rules apply in the current Scene
+- Targetability and interaction masks (intent gating)
+- **SceneRuleContext**: what rules apply in the current scene
+- Scene hard-flags (combat/damage/death/build legality)
 - Combat legality gates (Allowed / Denied reason codes)
-- Combat state ownership at the Actor level (Alive / Dead / InCombat, etc.)
+- Combat state ownership at the Actor level (Alive / Dead / InCombat)
 
 ### This document does NOT own
 - Combat math / hit / damage resolution *(see `COMBAT_CORE.md`)*
-- Player stat aggregation *(see `PLAYER_COMBAT_STATS.md`)*
-- Spell mechanics *(see `SPELL_CATEGORY_MODEL.md`)*
-- Status effect definitions *(see `STATUS_EFFECT_CATALOG.md`)*
-- Items, affixes, durability schemas *(see item docs)*
+- Player combat stat aggregation *(see `PLAYER_COMBAT_STATS.md`)*
+- Spell payload semantics *(see spell/status docs)*
+- Item schemas / affix schemas *(see item docs)*
+- Housing content rules *(see `HOUSING_RULES.md`)*
 
 ---
 
@@ -53,14 +54,14 @@ Combat Core consumes Actors after **Actor rules** validate legality.
    - Server validates intent against Actor + Scene rules.
 
 3. **Scene rules are hard gates**
-   - If a scene disallows an action (combat, damage, etc.), the server refuses it.
-   - Clients may not “opt in” locally.
+   - If a scene disallows an action, the server refuses it.
+   - Clients may not bypass legality locally.
 
 4. **PvE and PvP share a pipeline**
    - Once legality is confirmed, execution is shared.
 
 5. **Status-first integrity**
-   - Status effects can modify what an Actor can do.
+   - Status effects may modify what an Actor can do.
    - Actor rules do not inspect individual statuses; they consume aggregated gates.
 
 ---
@@ -68,7 +69,6 @@ Combat Core consumes Actors after **Actor rules** validate legality.
 ## CORE TYPES
 
 ### ActorType (LOCKED)
-Defines the broad category of Actor.
 
 - `Player`
 - `Monster`
@@ -76,13 +76,14 @@ Defines the broad category of Actor.
 - `Vendor`
 - `Pet`
 - `Summon`
-- `Object` *(doors, chests, traps, shrines, etc.)*
+- `Object` *(doors, chests, traps, shrines, house pieces, etc.)*
 
-> NOTE: `Vendor` is intentionally separate from `NPC` to support safe-scene commerce rules.
+> `Vendor` is intentionally separate from `NPC` to support safe-scene commerce rules.
 
 ---
 
 ### FactionId (LOCKED MODEL)
+
 Actors belong to a faction.
 
 Examples:
@@ -101,62 +102,66 @@ Relationship outcomes:
 
 ---
 
-## NEW: SCENE RULE CONTEXT (AUTHORITATIVE)
+## SCENE RULE CONTEXT (AUTHORITATIVE)
 
 ### SceneRuleContext (LOCKED)
+
 Every loaded scene must declare exactly one `SceneRuleContext`.
 
-- `MainlandHousing` *(safe: housing + vendors, immersion camera)*
-- `HotnowVillage` *(safe hub: shops, banking, logistics)*
-- `Dungeon` *(danger: PvE/PvP, progression, loot)*
+- `ShardVillage` *(safe + build zone: housing, vendors, social)*
+- `Dungeon` *(danger: PvE/PvP, loot, progression)*
 
 **SceneRuleContext is server authority.**
-- The server determines the current scene context.
+- The shard host determines the current scene context.
 - Clients may display different UI/camera, but may not bypass server gates.
+
+> Note: Under the player-hosted shard model, `Dungeon` scenes run on the same shard host.
 
 ---
 
 ### SceneRuleFlags (LOCKED)
+
 Each `SceneRuleContext` resolves to a set of hard flags.
 
-| Flag | MainlandHousing | HotnowVillage | Dungeon |
-|---|---:|---:|---:|
-| `CombatAllowed` | ❌ | ❌ | ✅ |
-| `DamageAllowed` | ❌ | ❌ | ✅ |
-| `DeathAllowed` | ❌ | ❌ | ✅ |
-| `DurabilityLossAllowed` | ❌ | ❌ | ✅ |
-| `ResourceGatheringAllowed` | ❌ | ❌ | ✅ |
-| `SkillGainAllowed` | ❌ | ❌ | ✅ |
-| `HostileActorsAllowed` | ❌ | ❌ | ✅ |
-| `PvPAllowed` | ❌ | ❌ | ✅ *(subject to Actor legality)* |
+| Flag | ShardVillage | Dungeon |
+|---|---:|---:|
+| `CombatAllowed` | ❌ | ✅ |
+| `DamageAllowed` | ❌ | ✅ |
+| `DeathAllowed` | ❌ | ✅ |
+| `DurabilityLossAllowed` | ❌ | ✅ |
+| `ResourceGatheringAllowed` | ❌ | ✅ |
+| `SkillGainAllowed` | ❌ | ✅ |
+| `HostileActorsAllowed` | ❌ | ✅ |
+| `PvPAllowed` | ❌ | ✅ *(subject to Actor legality)* |
+| `BuildingAllowed` | ✅ *(Owner-permissions apply)* | ❌ |
+| `VendorTradeAllowed` | ✅ | ✅ *(rare; content-driven)* |
 
 **Design lock:** If a flag is ❌, the server must refuse all intents that would violate it.
+
+`BuildingAllowed` does not grant permission by itself; it only means the *scene* permits building.  
+Who can build is owned by `HOUSING_RULES.md`.
 
 ---
 
 ### Allowed Camera Modes (DESIGN SUPPORT)
-Camera is not owned by Actor rules, but scenes must still declare what camera modes are allowed for clarity.
 
-- MainlandHousing: `FirstPerson`, `ThirdPerson`
-- HotnowVillage: `TopDown` *(optionally allow limited zoom/tilt later, but still non-combat)*
+Camera is a client presentation layer. Scene flags are the authority layer.
+
+- ShardVillage: `TopDown` *(optionally allow limited zoom/tilt)*
 - Dungeon: `TopDown`
-
-> Camera is a client presentation layer. Scene flags are the authority layer.
 
 ---
 
 ## ACTOR BEHAVIOR BY SCENE (LOCKED)
 
-This section defines **how the same ActorType behaves differently** depending on `SceneRuleContext`.
-
-### MainlandHousing (SAFE)
-**Intent:** social, housing, economy, immersion.
+### ShardVillage (SAFE + BUILD)
+**Intent:** social, housing, economy.
 
 **Actors allowed**
 - Players
-- Vendors (player vendors + NPC vendors, if needed)
+- Vendors
 - NPCs (non-hostile)
-- Objects (doors, chests, house pieces, deco)
+- Objects (doors, containers, house pieces, deco)
 
 **Actors forbidden**
 - Hostile Monsters
@@ -166,45 +171,14 @@ This section defines **how the same ActorType behaves differently** depending on
 - Players cannot:
   - Start attacks
   - Apply harmful spells
-  - Perform hostile targeting actions
-  - Cause durability loss
-  - Gain skills
-- Vendors can:
-  - Trade
-  - List items for sale
-  - Receive coins (banked-only rules belong to economy docs)
-- Objects can:
-  - Be used/interacted with
-  - Be placed/constructed (building system)
-  - Be locked down (housing permissions)
-
----
-
-### HotnowVillage (SAFE HUB)
-**Intent:** spawn hub, preparation, services.
-
-**Actors allowed**
-- Players
-- NPCs
-- Vendors
-- Objects (bank, crafting stations, doors)
-
-**Actors forbidden**
-- Hostile Monsters
-- PvP hostility
-
-**Behavior constraints**
-- Players cannot:
-  - Start attacks
-  - Apply harmful spells
   - Force hostile combat states
   - Cause durability loss
   - Gain skills
 - Players can:
-  - Target/select (non-hostile selection)
+  - Select/target non-hostile
   - Interact/use
   - Trade
-  - Bank / insure / repair (systems outside this doc)
+  - Build/modify housing **if housing permissions allow**
 
 ---
 
@@ -226,15 +200,15 @@ This section defines **how the same ActorType behaves differently** depending on
   - Take damage / die
   - Lose durability
   - Gain skills
-- Monsters:
-  - Are usually hostile to Players, but this is data-driven
+- PvP:
+  - Enabled by scene flag
+  - Still subject to Actor legality and faction/relationship rules
 
 ---
 
 ## COMBAT STATE (LOCKED)
 
 ### CombatState
-Represents server-authoritative combat posture.
 
 - `Peaceful` *(not in combat)*
 - `InCombat` *(recent hostile action)*
@@ -242,7 +216,7 @@ Represents server-authoritative combat posture.
 
 **Rules**
 - `Dead` Actors cannot submit or receive combat actions.
-- SceneRuleContext must be checked before any state transition into `InCombat`.
+- SceneRuleContext must be checked before any transition into `InCombat`.
   - If `CombatAllowed == false`, an Actor may never enter `InCombat`.
 
 ---
@@ -258,39 +232,15 @@ Actor rules gate **what targeting intents are valid**, independent of UI.
 - `CastBeneficial`
 - `CastHarmful`
 
-**Scene gates**
-- In safe scenes (`CombatAllowed == false`):
-  - `Attack` and `CastHarmful` must be refused.
+Scene flags + Actor legality determine whether each intent can proceed.
 
 ---
 
-## ATTACK LEGALITY (AUTHORITATIVE)
+## REQUIRED UPDATES TO DOCUMENTS_INDEX.md (PATCH)
 
-### AttackLegalityResult
-Server returns a structured result for any hostile attempt.
-
-- `Allowed`
-- `Denied_SceneDisallowsCombat`
-- `Denied_SceneDisallowsDamage`
-- `Denied_TargetNotHostile`
-- `Denied_TargetNotAttackable`
-- `Denied_AttackerDead`
-- `Denied_TargetDead`
-- `Denied_PvPNotAllowed`
-- `Denied_RangeOrLoS`
-- `Denied_StatusGated` *(e.g., stunned, pacified, etc. via aggregated gates)*
-
-**Design lock:** `COMBAT_CORE.md` must require `Allowed` before scheduling any swing/cast damage resolution.
-
----
-
-## REQUIRED IMPLEMENTATION ARTIFACTS (NEXT)
-
-1. `SceneRuleContext` provider (server) that exposes flags to all validation systems
-2. `FactionRelationshipTable` (ScriptableObject)
-3. `AttackLegalityResolver` (pure rules)
-4. `TargetIntentValidator` (pure rules)
-5. `CombatStateTracker` integration (combat entry forbidden in safe scenes)
+Update the `ACTOR_MODEL.md` description if needed to reflect:
+- `ShardVillage` replacing prior housing/hub contexts
+- Added `BuildingAllowed` as a scene legality flag (permission owned by housing)
 
 ---
 
@@ -301,4 +251,5 @@ This document is **authoritative**.
 Any change must:
 - Increment Version
 - Update Last Updated
-- Call out impacted dependent systems (Targeting, Combat Core, UI, Housing)
+- Explicitly call out impacts to scene legality gates or targeting/combat legality
+
