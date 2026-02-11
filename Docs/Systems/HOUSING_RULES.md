@@ -1,263 +1,174 @@
 # HOUSING_RULES.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 0.1  
-Last Updated: 2026-01-29  
+Version: 1.0  
+Last Updated: 2026-02-11  
 Engine: Unity 6 (URP)  
-Networking: Netcode for GameObjects (NGO)  
-Authority: Server-authoritative  
-SceneRuleContext: MainlandHousing (required)  
+Authority: Server-authoritative (Shard Host)  
 
 ---
 
 ## PURPOSE
 
-Defines the authoritative **Housing system rules** for *Ultimate Dungeon*.
+Defines the **deedless, shard-based housing system** for *Ultimate Dungeon*.
 
-Housing exists to provide:
-- Player identity and persistence
-- Storage and decoration
-- Player-run vendors (economy)
-- Social and immersive gameplay (1st/3rd person)
+This document locks:
+- Where players may build
+- Who may build
+- How permissions replace land ownership
+- What housing is allowed to do (and not do)
 
-Housing must **never** create progression exploits.
-
----
-
-## HARD DESIGN LOCKS (MUST ENFORCE)
-
-1. **Housing only exists in the Mainland scene**
-   - SceneRuleContext must be `MainlandHousing`.
-
-2. **No combat or progression in Mainland**
-   - `CombatAllowed = false`
-   - `DamageAllowed = false`
-   - `DeathAllowed = false`
-   - `DurabilityLossAllowed = false`
-   - `SkillGainAllowed = false`
-   - `ResourceGatheringAllowed = false`
-
-3. **Server authoritative placement**
-   - Clients preview locally.
-   - Server validates and commits placement.
-
-4. **No instanced housing**
-   - Mainland is a shared open world.
-
-5. **Land is a scarce world resource**
-   - Plots cannot overlap.
-   - Buildings cannot clip roads or restricted zones.
+Housing is treated as **personal world expression and utility**, not a scarce global resource.
 
 ---
 
-## TERMS
+## DESIGN SUMMARY (LOCKED)
 
-### Mainland
-A large shared map containing roads and many buildable sites.
-
-### Land Claim
-A server-owned record that defines a player’s right to build within a region.
-
-### Claim Anchor
-The world position where the deed was placed.
-
-### Build Envelope
-The geometric region around the Claim Anchor where building is permitted.
-
-### House Object
-Any placeable built element (foundation, wall, floor, door, roof, furniture, etc.).
-
-### Vendor
-A player-owned Actor that can sell items for coins.
+- There are **no land deeds**
+- There is **no land claiming system**
+- Each player owns **one shard**
+- On their own shard, players may build **freely** within the Village scene
+- Visitors may only build if explicitly permitted
+- Housing authority is enforced via **roles**, not items
 
 ---
 
-## HOUSING FLOW (LOCKED)
+## SCOPE BOUNDARIES (NO OVERLAP)
 
-### Step 1 — Purchase Deed
-- Player buys a **Deed** from an NPC vendor (usually in Hotnow Village).
-- The deed is an inventory item with:
-  - `DeedType`
-  - `EnvelopeRadiusMeters` *(or footprint size)*
-  - `MaxAllowedObjects` *(optional cap)*
-  - `PlacementRulesetId`
+Owned elsewhere:
+- Multiplayer topology & shard ownership: `PLAYER_HOSTED_SHARDS_MODEL.md`
+- Item identity & instances: `ITEMS.md`
+- Vendor behavior & economy: `ITEMS.md`, economy docs
+- Scene legality & PvP rules: `ACTOR_MODEL.md`, `TARGETING_MODEL.md`
 
-### Step 2 — Place Deed in Mainland
-- Player enters Mainland and uses the deed.
-- Client enters **Placement Preview Mode**.
-- Player selects a location and confirms.
-
-### Step 3 — Server Validates Claim
-Server validates:
-- SceneRuleContext is `MainlandHousing`
-- Location is within buildable zoning
-- Not overlapping an existing claim
-- Not intersecting roads / restricted areas
-- Not inside blocked volumes (mountains, water, etc.)
-
-If valid:
-- Server creates a **LandClaim** record.
-- Server consumes the deed.
-- Server spawns a **Claim Marker** object (optional) at the anchor.
-
-### Step 4 — Build Within Envelope
-- Player can place house objects using a building menu.
-- Every placement is previewed client-side and committed server-side.
+This document does **not** define:
+- Building placement UI
+- Crafting recipes
+- Decorative vs functional object stats
 
 ---
 
-## LAND CLAIM MODEL (AUTHORITATIVE)
+## CORE DEFINITIONS
 
-A LandClaim record must include:
+### Shard Owner
+The player hosting the shard.
 
-- `ClaimId` (stable unique id)
-- `OwnerPlayerId`
-- `AnchorPosition`
-- `EnvelopeShape`
-  - `Circle(radius)` *(default for v0.1)*
-  - *(future: rectangle/polygon)*
-- `EnvelopeRadiusMeters`
-- `PlacementRulesetId`
-- `CreatedUtc`
-- `LastModifiedUtc`
-- `AllowedEditors[]` *(permissions list)*
-- `VendorSlots` *(how many vendors can be placed)*
+- Has full build authority within permitted scenes.
+- May delegate permissions to other players.
 
----
+### Village Scene (LOCKED)
+A designated scene on each shard where player housing is allowed.
 
-## BUILD ENVELOPE (LOCKED)
+- Free-build zone for the shard owner.
+- No land claims, plots, or boundaries.
+- Server enforces placement legality.
 
-### Default shape
-- Circle centered on Claim Anchor.
+### Non-Village Scenes
+All other scenes (e.g. wilderness, dungeons).
 
-### Envelope rules
-1. All placeable house objects must have their **placement bounds fully inside** the envelope.
-2. No object may cross outside the envelope, even partially.
-3. The envelope is authoritative server-side.
-
-### Restricted zones
-Even inside the envelope, placement is refused if it intersects:
-- Roads
-- Public structures
-- No-build zones
-- Other claims
+- **No player construction allowed by default**.
+- Exceptions must be explicitly documented elsewhere.
 
 ---
 
-## PLACEMENT VALIDATION (SERVER, LOCKED ORDER)
+## DESIGN LOCKS (MUST ENFORCE)
 
-When a player attempts to place any house object:
+1. **No Deeds, No Claims**
+   - There is no item or system that grants land ownership.
+   - Land ownership is implicit via shard ownership.
 
-1. Validate SceneRuleContext == `MainlandHousing`
-2. Validate player has build permission for the claim
-3. Validate object definition is allowed in this ruleset
-4. Validate object bounds are within envelope
-5. Validate collision rules (no overlap with blocked volumes)
-6. Validate grid/snap rules (if enabled)
-7. Commit: spawn object as a networked entity and record it
+2. **Village-Only Construction**
+   - Player construction is allowed only in the Village scene.
 
-If any check fails:
-- Server refuses placement
-- Client remains in preview mode
+3. **Shard-Local Authority**
+   - All housing actions are validated by the shard host.
 
----
-
-## BUILDING SYSTEM (VALHEIM-STYLE, LOCKED)
-
-### Build pieces require resources
-- House objects have a resource cost.
-- Resources are consumed on server commit.
-
-### No resource gathering in Mainland
-Resources must be obtained from Dungeon scenes.
-
-**Design consequence:** Mainland is a sink and showcase for dungeon-earned materials.
+4. **Permissions Over Items**
+   - Build rights are role-based, not item-based.
 
 ---
 
-## PERMISSIONS (LOCKED)
+## PERMISSIONS MODEL
 
-A claim has these roles:
+### Roles
 
-- **Owner**: full control
-- **Editor**: can place/remove within claim
-- **Visitor**: can enter and interact with public items
+| Role     | Place Objects | Remove Objects | Manage Vendors | Grant Permissions |
+|----------|---------------|----------------|----------------|-------------------|
+| Owner    | Yes           | Yes            | Yes            | Yes               |
+| CoOwner  | Yes           | Yes            | Yes            | No                |
+| Editor   | Yes (scoped)  | Yes (scoped)   | No             | No                |
+| Visitor  | No            | No             | No             | No                |
 
-Rules:
-- Only Owner can grant/revoke Editor.
-- Public/Private permissions apply per interactable container or door.
-
----
-
-## CONTAINERS & STORAGE (LOCKED POLICY)
-
-Storage is allowed in housing.
-
-### Security model (Proposed — Not Locked)
-- Containers can be:
-  - Private (Owner only)
-  - Shared (Owner + Editors)
-  - Public (anyone)
-
-### Exploit locks
-- Storage access must never allow combat/damage.
-- Storage must never allow skill gains.
+### Enforcement Rules
+- All permission checks are server-side.
+- Editors may be restricted to specific areas or object categories (implementation-defined).
+- Permission failures must return explicit deny reasons.
 
 ---
 
-## PLAYER VENDORS (AUTHORITATIVE RULES)
+## BUILDING RULES
 
-### Vendor placement
-- Vendors may only be placed inside a LandClaim.
-- Each claim has `VendorSlots`.
-- Vendor counts are enforced server-side.
+### Placement
+- Objects may be placed anywhere in the Village scene, subject to:
+  - Collision checks
+  - Terrain alignment rules
+  - Scene-specific placement constraints
 
-### Vendor behavior
-- Vendors are Actors with `ActorType = Vendor`.
-- Vendors are non-hostile and cannot be attacked.
-- Vendors can:
-  - List items for sale
-  - Hold inventory for sale
-  - Accept purchases
+### Removal
+- Only permitted roles may remove objects.
+- Removing an object destroys it unless a recovery mechanic is explicitly added later.
 
-### Currency lock
-Vendor purchases must use **Banked Coins only**.
-
-> The bank/held split is defined in `PLAYER_DEFINITION.md`. This doc only enforces that Mainland commerce is banked-only.
-
-### Listing rules (Proposed — Not Locked)
-- Owner sets price per item stack.
-- Optional listing fee to sink currency.
+### Overlap & Abuse Prevention
+- Server must prevent:
+  - Object overlap exploits
+  - Blocking of essential NPCs or spawn points
+  - Denial-of-service style spam placement
 
 ---
 
-## DECAY & MAINTENANCE (Open Question)
+## VENDORS & INTERACTION
 
-We must define whether houses:
-- Persist forever
-- Require upkeep (tax)
-- Decay when inactive
-
-**Open Question:** Do you want UO-style house decay (IDOC) or permanent claims?
+- Vendors are considered housing-linked objects.
+- Vendor placement follows housing permissions.
+- Visitors may interact with vendors but may not modify them.
 
 ---
 
-## MULTIPLAYER & CONSISTENCY (LOCKED)
+## PERSISTENCE
 
-- All placed objects are spawned/owned by the server.
-- The claim record is the source of truth.
-- Clients are never trusted for bounds checks or overlap checks.
+### What Is Saved
+- All placed housing objects
+- Vendor states and inventories
+- Permissions assignments
+
+### Storage
+- Housing state is saved as part of shard world data.
+- Persistence format is owned by the shard save system.
 
 ---
 
-## REQUIRED DEPENDENCIES (NEXT)
+## VISITOR SAFETY & PvP INTERACTION
 
-1. `Mainland` scene zoning volumes (roads, no-build, buildable)
-2. `Deed` item family (ItemDefs)
-3. `LandClaim` persistence model (save/load)
-4. `HouseObjectDef` definitions (build pieces + costs)
-5. `PlacementPreview` client UX
-6. `PlacementValidator` server rules
-7. `Vendor` UI and purchase pipeline
+- Village scenes are **non-PvP by default**.
+- Combat legality is enforced by scene rules.
+- Housing objects cannot be damaged unless explicitly enabled later.
+
+---
+
+## REMOVED SYSTEMS (EXPLICIT)
+
+The following systems **do not exist**:
+- Land deeds
+- Plot boundaries
+- Claim flags
+- Rent or upkeep mechanics
+
+Any implementation introducing these is **invalid** unless this document is revised.
+
+---
+
+## REQUIRED DOCUMENT INDEX UPDATE
+
+Ensure `HOUSING_RULES.md` is listed under **WORLD & HOUSING SYSTEMS** in `DOCUMENTS_INDEX.md`.
 
 ---
 
@@ -268,5 +179,5 @@ This document is **authoritative**.
 Any change must:
 - Increment Version
 - Update Last Updated
-- Call out impacted dependent systems (Economy, Items, Scene Rules, Vendors)
+- Explicitly call out impacts to shards, permissions, or persistence
 
