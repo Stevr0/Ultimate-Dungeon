@@ -1,242 +1,196 @@
 # PLAYER_MODEL.md — Ultimate Dungeon (AUTHORITATIVE)
 
-Version: 0.2  
-Last Updated: 2026-01-28
+Version: 1.0  
+Last Updated: 2026-02-11  
+Engine: Unity 6 (URP)  
+Networking: Netcode for GameObjects (NGO) + Steam Networking (Planned)  
+Authority: Server-authoritative (Shard Host while connected)  
 
 ---
 
 ## PURPOSE
 
-This document defines the **Player Actor runtime model and architectural contract** for *Ultimate Dungeon*.
+Defines the **Player runtime and persistence model** for *Ultimate Dungeon*.
 
-It answers the question:
+This document locks:
+- What a Player is (and is not)
+- Player identity and lifecycle
+- Relationship between Player, Character, and Shard
+- High-level invariants relied on by combat, UI, inventory, and persistence systems
 
-> *What is a Player at runtime, and how do systems are allowed to interact with it?*
-
-This document is **structural and architectural only**.
-
-It deliberately does **not** define:
-- Numeric values
-- Caps or balance
-- Progression rules
-- Combat math
-- Item stats
-
-All such rules live in their respective authoritative documents.
-
----
-
-## DESIGN LOCKS (ABSOLUTE)
-
-1. **Server-authoritative state**
-   - The server is the sole authority for all gameplay-affecting state.
-
-2. **No classes / no levels / no XP**
-   - Progression is strictly **skill-based**.
-
-3. **Status effects are decoupled from items**
-   - Items may apply or grant statuses, but **status behavior is defined and resolved independently**.
-
-4. **Deterministic resolution**
-   - All gameplay outcomes must be reproducible from deterministic inputs.
+This document intentionally avoids combat math, UI layout, and item schemas.
 
 ---
 
 ## SCOPE BOUNDARIES (NO OVERLAP)
 
-### This document **owns**:
-- Player-as-Actor definition
-- Runtime component responsibilities
-- Authority & replication rules
-- High-level integration contracts between systems
+Owned elsewhere:
+- Shard topology & hosting: `PLAYER_HOSTED_SHARDS_MODEL.md`
+- Session flow & persistence mechanics: `SESSION_AND_PERSISTENCE_MODEL.md`
+- Actor legality & scene rules: `ACTOR_MODEL.md`, `SCENE_RULE_PROVIDER.md`
+- Combat execution: `COMBAT_CORE.md`
+- Item identity & instances: `ITEMS.md`, `ITEM_DEF_SCHEMA.md`
 
-### This document **does NOT own**:
-- Player baselines, caps, or starting values *(see `PLAYER_DEFINITION.md`)*
-- Combat rules or formulas *(see `COMBAT_CORE.md`)*
-- Stat aggregation logic *(see `PLAYER_COMBAT_STATS.md`)*
-- Skill identifiers *(see `SKILL_ID_CATALOG.md`)*
-- Item schemas or lists *(see `ITEM_DEF_SCHEMA.md`, `ITEM_CATALOG.md`)*
-- Status semantics *(see `STATUS_EFFECT_CATALOG.md`)*
-
-If a rule is not explicitly structural, it does **not** belong here.
+This document does **not** define:
+- Combat formulas
+- Input bindings
+- UI panels or hotkeys
+- Save file formats
 
 ---
 
-## PLAYER = ACTOR
+## CORE DEFINITIONS
 
-A **Player** is a specialized **Actor** that:
-- Is network-owned by a single client
-- Exists in a persistent multiplayer world
-- Issues *intents* (never direct actions)
-- Has all gameplay state validated and mutated by the server
+### Account (LOCKED)
 
-The Player is **not privileged**.
-NPCs, enemies, and summons follow the same Actor rules where applicable.
+- A real-world user identity.
+- **Planned:** backed by Steam (`SteamId`).
+- One account may log in from one client at a time.
 
 ---
 
-## RUNTIME COMPONENT MODEL
+### Character (LOCKED)
 
-The Player Actor is composed of modular, server-authoritative components.
+- Exactly **one Character per Account**.
+- The Character represents all long-term progression:
+  - Attributes
+  - Skills
+  - Inventory
+  - Equipment
+  - Learned spells
 
-> Exact class names may vary; this list defines the **required responsibilities**, not the exact implementation.
-
-### Core Identity & Authority
-
-- **PlayerNetIdentity**
-  - NGO ownership
-  - Local vs remote player detection
-  - Server authority enforcement
-
-- **PlayerCore**
-  - Central runtime hub
-  - Binds and exposes authoritative subsystems
-  - Initializes server-only systems
+- The Character is **global**:
+  - It is not owned by any shard.
+  - It persists across shard visits.
 
 ---
 
-### Attributes, Vitals & Skills
+### Player (Runtime Entity)
 
-- **PlayerStats**
-  - Holds primary attributes
-  - Applies modifiers from items and statuses
-  - Exposes *effective* values only
+- A Player is the **runtime representation** of a Character inside a shard session.
+- Created when a client successfully joins a shard.
+- Destroyed when the client leaves or disconnects.
 
-- **PlayerVitals**
-  - Holds current/max vitals
-  - Applies regen and damage
-  - Exposes vitals to Combat Core
-
-- **PlayerSkillBook**
-  - Holds skill values and lock states
-  - Receives gain/loss requests from progression systems
-
-> Numeric derivation, caps, and progression rules are defined in `PLAYER_DEFINITION.md` and `PROGRESSION.md`.
+> A Player is not a save file and not an account. It is a runtime actor.
 
 ---
 
-### Inventory & Equipment
+## DESIGN LOCKS (MUST ENFORCE)
 
-- **InventoryComponent**
-  - Container graph (bags within bags)
-  - Stack handling and weight calculation
+1. **Single Character Rule**
+   - Each Account owns exactly one Character.
 
-- **EquipmentComponent**
-  - Manages equipped ItemInstances
-  - Enforces slot and handedness rules
-  - Exposes equipped items to stat aggregation
+2. **Character Persistence Is Global**
+   - Progression is never shard-scoped.
 
-> Item identity, schema, and base values are defined in item system documents.
+3. **Shard Authority While Connected**
+   - While inside a shard, the shard host is authoritative over the Player runtime entity.
 
----
+4. **Client Supplies Character Snapshot**
+   - The client provides its Character Snapshot when joining a shard.
 
-### Status Effects
-
-- **StatusEffectSystem**
-  - Applies, refreshes, stacks, and removes statuses
-  - Ticks timed effects
-  - Exposes action gates and modifiers
-
-Status behavior and semantics are defined exclusively in `STATUS_EFFECT_CATALOG.md`.
-
-This system **never** executes combat logic.
+5. **No Server-Owned Characters (MVP)**
+   - Characters are not stored centrally or per-shard.
 
 ---
 
-### Targeting & Interaction
+## PLAYER LIFECYCLE
 
-- **TargetingComponent**
-  - Tracks the player’s current target
-  - Exposes validated target references
+### Login (Client-Side)
 
-- **InteractionComponent**
-  - Submits interaction intents
-  - Server validates range, legality, and ownership
+1. Client authenticates with Steam.
+2. Client loads local Character data.
+3. Client enters Lobby.
 
 ---
 
-## AUTHORITY & REPLICATION MODEL
+### Join Shard
 
-### Server-Authoritative State
-
-The server is the sole writer for:
-- Vitals (current and max)
-- Attributes and derived stats
-- Skill values and lock states
-- Inventory contents and container topology
-- Equipped items
-- Active status effects
-- Currency balances
-- Death and respawn state
+1. Client selects a shard from the Lobby.
+2. Client connects via Steam session.
+3. Client sends Character Snapshot to shard host.
+4. Shard host validates snapshot shape and caps.
+5. Player runtime entity is spawned.
 
 ---
 
-### Client Responsibilities
+### In-Shard Runtime
 
-Clients are limited to:
-- Submitting input intents
-- Rendering UI and visuals
-- Cosmetic-only prediction (optional)
+While connected:
+- Player exists as an **Actor** (`ActorType.Player`).
+- Player is subject to:
+  - SceneRuleContext legality
+  - Actor legality rules
+  - Housing permissions (if applicable)
 
-Clients **never**:
-- Modify gameplay state
-- Roll RNG
-- Apply damage or healing
-
----
-
-### Replication
-
-The following are replicated to clients as read-only data:
-- Vitals snapshots
-- Skill values
-- Attribute summaries
-- Combat events
-- Status visuals (icons, VFX triggers)
+All gameplay intents flow:
+> Client → Server (Shard Host) → Validation → Execution
 
 ---
 
-## STATUS EFFECT INTEGRATION CONTRACT
+### Leave Shard
 
-The Player Actor must expose a status receiver interface that allows:
-- Querying action gates (movement, attack, casting, bandaging)
-- Applying periodic effects (DoT, HoT)
-- Applying modifiers (speed, swing time, cast time)
-
-Status execution is handled by consuming systems (Combat, Movement), not by the Player itself.
+On voluntary leave or disconnect:
+1. Shard host sends final Character Snapshot to client (best effort).
+2. Client commits snapshot locally.
+3. Player runtime entity is destroyed.
 
 ---
 
-## DEATH & RESPAWN (STRUCTURAL ONLY)
+## PLAYER VS SHARD RESPONSIBILITIES
 
-This document defines **when** death occurs, not **what happens**.
+### Player-Owned (Character)
 
-- When HP reaches zero, the Player enters a Dead state
-- Combat Core triggers death exactly once
-- Death handling is delegated to the death/loot pipeline
+- Attributes & stats
+- Skills & progression
+- Inventory & equipment
+- Learned abilities
 
-> Loot loss, insurance, corpse creation, and currency rules are owned by `PLAYER_DEFINITION.md`.
+### Shard-Owned (World)
+
+- Village build state
+- Vendors
+- NPCs and monsters
+- Dungeon instances
 
 ---
 
-## IMPLEMENTATION GUARANTEES
+## MULTI-SHARD VISITING (LOCKED)
 
-With this model locked:
-- Combat systems can rely on stable interfaces
-- Status effects can be added without refactors
-- Item systems remain decoupled
-- Progression laws remain enforceable
+- A Character may visit any active shard.
+- Inventory travels with the Character.
+- Only carried items move between shards.
+- There is no shard-level inventory or stash.
 
-This document must remain **numerically empty**.
+---
+
+## FAILURE & RECOVERY (SUMMARY)
+
+- Client crash:
+  - Character recovers from last committed local snapshot.
+
+- Host crash:
+  - Player is disconnected.
+  - Character recovers locally.
+
+Detailed mechanics are owned by `SESSION_AND_PERSISTENCE_MODEL.md`.
+
+---
+
+## REQUIRED UPDATES TO DOCUMENTS_INDEX.md (PATCH)
+
+Ensure `PLAYER_MODEL.md` is listed under **CORE PLAYER & IDENTITY** (or equivalent) with description:
+
+> Defines Player runtime entity, single-character-per-account rule, and character vs shard ownership boundaries.
 
 ---
 
 ## DESIGN LOCK CONFIRMATION
 
-This document is **authoritative for player architecture only**.
+This document is **authoritative**.
 
 Any change must:
 - Increment Version
 - Update Last Updated
-- Declare impacted dependent documents
+- Explicitly call out impacts to identity, persistence, or shard authority
 
