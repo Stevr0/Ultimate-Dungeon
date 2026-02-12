@@ -59,7 +59,7 @@ namespace UltimateDungeon.UI
             SourceLootItemDefId = string.Empty;
         }
 
-        public static void BeginLootEntryDrag(ulong sourceCorpseNetId, string instanceId, string itemDefId)
+        public static void BeginLootEntry(ulong sourceCorpseNetId, string instanceId, string itemDefId)
         {
             Kind = DragKind.LootEntry;
             SourceInventorySlot = -1;
@@ -67,6 +67,12 @@ namespace UltimateDungeon.UI
             SourceCorpseNetId = sourceCorpseNetId;
             SourceLootInstanceId = instanceId ?? string.Empty;
             SourceLootItemDefId = itemDefId ?? string.Empty;
+        }
+
+        public static void BeginLootEntryDrag(ulong sourceCorpseNetId, string instanceId, string itemDefId)
+        {
+            // Backward-compatible alias used by older call sites.
+            BeginLootEntry(sourceCorpseNetId, instanceId, itemDefId);
         }
 
         public static void Clear()
