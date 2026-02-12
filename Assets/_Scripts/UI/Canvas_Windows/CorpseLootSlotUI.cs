@@ -1,5 +1,4 @@
 using TMPro;
-using Unity.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -8,67 +7,94 @@ namespace UltimateDungeon.UI
 {
     /// <summary>
     /// CorpseLootSlotUI
-    /// ----------------
-    /// Read-only corpse loot slot view that supports drag-out only.
+    /// -----------------------------------------------------------------------
+    /// Drag source for ONE corpse-loot slot.
     ///
-    /// Behavior:
-    /// - Shows icon + optional stack count.
-    /// - Starts a drag payload via UIInventoryDragContext as DragKind.LootEntry.
-    /// - Never accepts drops itself (corpse is take-only; no put/reorder).
+    /// Key behavior:
+    /// - Read-only source (we only drag OUT from corpse loot).
+    /// - Never receives/accepts drops itself.
+    /// - Creates a visual drag ghost while dragging.
+    /// - Temporarily disables raycast blocking on both:
+    ///   1) The source slot (so inventory drop targets can receive OnDrop)
+    ///   2) The ghost object (so it never intercepts raycasts)
+    ///
+    /// Editor wiring checklist:
+    /// 1) Add this script to your corpse loot slot prefab.
+    /// 2) Assign Icon Image and Stack Count TMP Text.
+    /// 3) Assign Drag Ghost Prefab:
+    ///    - Should be a UI prefab (RectTransform) with an Image for icon display.
+    ///    - Add a CanvasGroup on the prefab root (recommended).
+    ///    - Set all Image/TMP components on the ghost to Raycast Target = false.
+    /// 4) Ensure the slot GameObject has a CanvasGroup.
+    ///    - If missing, this script auto-adds one in Awake.
+    ///
+    /// How this integrates with InventorySlotDropTarget:
+    /// - OnBeginDrag publishes loot payload into UIInventoryDragContext.
+    /// - InventorySlotDropTarget.OnDrop reads that payload and sends the
+    ///   server-authoritative loot-take request.
+    /// - We do not mutate inventory/corpse state locally in this slot script.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class CorpseLootSlotUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
     {
-        [Header("UI")]
+        [Header("Slot UI")]
         [SerializeField] private Image iconImage;
-        [SerializeField] private TMP_Text stackText; // optional
+        [SerializeField] private TMP_Text stackCountText;
 
-        private CanvasGroup _canvasGroup;
-        private bool _prevBlocksRaycasts;
-        private float _prevAlpha;
+        [Header("Drag Ghost")]
+        [Tooltip("UI prefab instantiated during drag. Should contain an Image used as icon display.")]
+        [SerializeField] private GameObject dragGhostPrefab;
 
-        private ulong _sourceCorpseId;
-        private FixedString64Bytes _instanceId;
-        private string _itemDefId;
+        private CanvasGroup _slotCanvasGroup;
+        private bool _slotPrevBlocksRaycasts;
+
+        private ulong _corpseNetId;
+        private CorpseLootSnapshotEntry _entry;
         private Sprite _icon;
-        private int _stackCount;
+
+        // Runtime drag ghost state
+        private RectTransform _ghostRect;
+        private Image _ghostIconImage;
+        private CanvasGroup _ghostCanvasGroup;
+        private bool _ghostPrevBlocksRaycasts;
+        private Canvas _rootCanvas;
 
         private void Awake()
         {
-            _canvasGroup = GetComponent<CanvasGroup>();
-            if (_canvasGroup == null)
-                _canvasGroup = gameObject.AddComponent<CanvasGroup>();
+            _slotCanvasGroup = GetComponent<CanvasGroup>();
+            if (_slotCanvasGroup == null)
+            {
+                // Required so we can toggle blocksRaycasts during drag.
+                _slotCanvasGroup = gameObject.AddComponent<CanvasGroup>();
+            }
+
+            // Root canvas is used to parent the runtime ghost and convert pointer coords.
+            _rootCanvas = GetComponentInParent<Canvas>();
+            if (_rootCanvas != null)
+                _rootCanvas = _rootCanvas.rootCanvas;
         }
 
         /// <summary>
-        /// Binds snapshot data to this slot.
-        /// Called by CorpseLootWindowUI when rebuilding its loot grid.
+        /// Binds this slot to a specific corpse snapshot entry.
+        /// Called by CorpseLootWindowUI when rebuilding the corpse grid.
         /// </summary>
-        public void Bind(ulong sourceCorpseId, CorpseLootSnapshotEntry entry, Sprite icon)
+        public void Bind(ulong corpseNetId, CorpseLootSnapshotEntry entry, Sprite icon)
         {
-            _sourceCorpseId = sourceCorpseId;
-            _instanceId = entry.InstanceId;
-            _itemDefId = entry.ItemDefId.ToString();
+            _corpseNetId = corpseNetId;
+            _entry = entry;
             _icon = icon;
-            _stackCount = Mathf.Max(1, entry.StackCount);
 
-            SetVisuals(_icon, _stackCount, showStackWhenOne: _icon == null);
-        }
-
-        private void SetVisuals(Sprite icon, int stackCount, bool showStackWhenOne)
-        {
             if (iconImage != null)
             {
                 iconImage.sprite = icon;
                 iconImage.enabled = icon != null;
             }
 
-            if (stackText != null)
+            if (stackCountText != null)
             {
-                bool show = stackCount > 1 || showStackWhenOne;
-                stackText.gameObject.SetActive(show);
-                if (show)
-                    stackText.text = stackCount.ToString();
+                int stackCount = Mathf.Max(1, entry.StackCount);
+                stackCountText.text = stackCount.ToString();
+                stackCountText.gameObject.SetActive(stackCount > 1);
             }
         }
 
@@ -77,39 +103,123 @@ namespace UltimateDungeon.UI
             if (eventData == null || eventData.button != PointerEventData.InputButton.Left)
                 return;
 
-            if (_sourceCorpseId == 0 || _instanceId.Length == 0)
+            if (_corpseNetId == 0 || _entry.InstanceId.Length == 0)
                 return;
 
-            // Publish loot drag payload for existing inventory drop targets.
-            UIInventoryDragContext.BeginLootEntryDrag(_sourceCorpseId, _instanceId.ToString(), _itemDefId);
+            // Required drag context call for corpse loot entries.
+            UIInventoryDragContext.BeginLootEntry(
+                sourceCorpseNetId: _corpseNetId,
+                instanceId: _entry.InstanceId.ToString(),
+                itemDefId: _entry.ItemDefId.ToString());
 
-            if (UIDragGhost.Instance != null)
-                UIDragGhost.Instance.Show(_icon);
+            CreateAndShowGhost(eventData);
 
-            _prevBlocksRaycasts = _canvasGroup.blocksRaycasts;
-            _canvasGroup.blocksRaycasts = false;
-
-            _prevAlpha = _canvasGroup.alpha;
-            _canvasGroup.alpha = 0.35f;
+            // Critical: disable source-slot raycast blocking while dragging so
+            // InventorySlotDropTarget can be hit.
+            _slotPrevBlocksRaycasts = _slotCanvasGroup.blocksRaycasts;
+            _slotCanvasGroup.blocksRaycasts = false;
         }
 
         public void OnDrag(PointerEventData eventData)
         {
-            // Drag ghost follows pointer in UIDragGhost.Update().
+            UpdateGhostPosition(eventData);
         }
 
         public void OnEndDrag(PointerEventData eventData)
         {
-            if (_canvasGroup != null)
+            // Restore slot raycast behavior.
+            if (_slotCanvasGroup != null)
+                _slotCanvasGroup.blocksRaycasts = _slotPrevBlocksRaycasts;
+
+            // Restore ghost raycast behavior before destroy (good hygiene if pooled later).
+            if (_ghostCanvasGroup != null)
+                _ghostCanvasGroup.blocksRaycasts = _ghostPrevBlocksRaycasts;
+
+            DestroyGhost();
+
+            // Only clear if drop did not land on a valid inventory drop target.
+            // If accepted, InventorySlotDropTarget has already consumed context in OnDrop.
+            if (!WasDropAccepted(eventData))
+                UIInventoryDragContext.Clear();
+        }
+
+        // Minimal hover hooks (intentional stub for tooltip systems).
+        public void OnPointerEnterHint() { }
+        public void OnPointerExitHint() { }
+
+        private void CreateAndShowGhost(PointerEventData eventData)
+        {
+            DestroyGhost();
+
+            if (dragGhostPrefab == null)
+                return;
+
+            Transform parent = _rootCanvas != null ? _rootCanvas.transform : transform.root;
+            var ghostGo = Instantiate(dragGhostPrefab, parent);
+            ghostGo.name = $"{name}_DragGhost";
+
+            _ghostRect = ghostGo.transform as RectTransform;
+            _ghostIconImage = ghostGo.GetComponentInChildren<Image>(includeInactive: true);
+            if (_ghostIconImage != null)
+                _ghostIconImage.sprite = _icon;
+
+            _ghostCanvasGroup = ghostGo.GetComponent<CanvasGroup>();
+            if (_ghostCanvasGroup == null)
+                _ghostCanvasGroup = ghostGo.AddComponent<CanvasGroup>();
+
+            _ghostPrevBlocksRaycasts = _ghostCanvasGroup.blocksRaycasts;
+            _ghostCanvasGroup.blocksRaycasts = false;
+
+            UpdateGhostPosition(eventData);
+        }
+
+        private void UpdateGhostPosition(PointerEventData eventData)
+        {
+            if (_ghostRect == null || eventData == null)
+                return;
+
+            Vector2 screenPos = eventData.position;
+
+            if (_rootCanvas != null && _rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
             {
-                _canvasGroup.blocksRaycasts = _prevBlocksRaycasts;
-                _canvasGroup.alpha = _prevAlpha;
+                RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    _rootCanvas.transform as RectTransform,
+                    screenPos,
+                    _rootCanvas.worldCamera,
+                    out Vector2 localPos);
+
+                _ghostRect.anchoredPosition = localPos;
             }
+            else
+            {
+                _ghostRect.position = screenPos;
+            }
+        }
 
-            if (UIDragGhost.Instance != null)
-                UIDragGhost.Instance.Hide();
+        private void DestroyGhost()
+        {
+            if (_ghostRect != null)
+                Destroy(_ghostRect.gameObject);
 
-            UIInventoryDragContext.Clear();
+            _ghostRect = null;
+            _ghostIconImage = null;
+            _ghostCanvasGroup = null;
+        }
+
+        private static bool WasDropAccepted(PointerEventData eventData)
+        {
+            if (eventData == null)
+                return false;
+
+            // If pointer is over an inventory drop target at end-drag, treat as accepted.
+            var hovered = eventData.pointerCurrentRaycast.gameObject;
+            if (hovered == null)
+                hovered = eventData.pointerEnter;
+
+            if (hovered == null)
+                return false;
+
+            return hovered.GetComponentInParent<InventorySlotDropTarget>() != null;
         }
     }
 }
