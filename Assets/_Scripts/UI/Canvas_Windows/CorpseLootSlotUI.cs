@@ -1,5 +1,7 @@
 using TMPro;
+using Unity.Collections;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace UltimateDungeon.UI
@@ -7,43 +9,62 @@ namespace UltimateDungeon.UI
     /// <summary>
     /// CorpseLootSlotUI
     /// ----------------
-    /// Tiny view/controller for a single loot slot:
-    /// - shows icon + optional stack count
-    /// - fires a click callback when pressed
+    /// Read-only corpse loot slot view that supports drag-out only.
+    ///
+    /// Behavior:
+    /// - Shows icon + optional stack count.
+    /// - Starts a drag payload via UIInventoryDragContext as DragKind.LootEntry.
+    /// - Never accepts drops itself (corpse is take-only; no put/reorder).
     /// </summary>
-    public sealed class CorpseLootSlotUI : MonoBehaviour
+    [DisallowMultipleComponent]
+    public sealed class CorpseLootSlotUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
     {
         [Header("UI")]
-        [SerializeField] private Button button;
         [SerializeField] private Image iconImage;
         [SerializeField] private TMP_Text stackText; // optional
 
-        private System.Action _onClick;
+        private CanvasGroup _canvasGroup;
+        private bool _prevBlocksRaycasts;
+        private float _prevAlpha;
+
+        private ulong _sourceCorpseId;
+        private FixedString64Bytes _instanceId;
+        private string _itemDefId;
+        private Sprite _icon;
+        private int _stackCount;
 
         private void Awake()
         {
-            // Defensive: allow prefab to work even if you forgot to wire button.
-            if (button == null)
-                button = GetComponent<Button>();
-
-            if (button != null)
-                button.onClick.AddListener(() => _onClick?.Invoke());
+            _canvasGroup = GetComponent<CanvasGroup>();
+            if (_canvasGroup == null)
+                _canvasGroup = gameObject.AddComponent<CanvasGroup>();
         }
 
         /// <summary>
-        /// Called by the loot window to populate the slot visuals.
+        /// Binds snapshot data to this slot.
+        /// Called by CorpseLootWindowUI when rebuilding its loot grid.
         /// </summary>
-        public void SetVisuals(Sprite icon, int stackCount, bool showStackWhenOne = false)
+        public void Bind(ulong sourceCorpseId, CorpseLootSnapshotEntry entry, Sprite icon)
+        {
+            _sourceCorpseId = sourceCorpseId;
+            _instanceId = entry.InstanceId;
+            _itemDefId = entry.ItemDefId.ToString();
+            _icon = icon;
+            _stackCount = Mathf.Max(1, entry.StackCount);
+
+            SetVisuals(_icon, _stackCount, showStackWhenOne: _icon == null);
+        }
+
+        private void SetVisuals(Sprite icon, int stackCount, bool showStackWhenOne)
         {
             if (iconImage != null)
             {
                 iconImage.sprite = icon;
-                iconImage.enabled = icon != null; // hide if missing
+                iconImage.enabled = icon != null;
             }
 
             if (stackText != null)
             {
-                // Only show stack count when relevant (typical inventory behavior).
                 bool show = stackCount > 1 || showStackWhenOne;
                 stackText.gameObject.SetActive(show);
                 if (show)
@@ -51,12 +72,44 @@ namespace UltimateDungeon.UI
             }
         }
 
-        /// <summary>
-        /// Called by the loot window to set the click action for this slot.
-        /// </summary>
-        public void SetOnClick(System.Action onClick)
+        public void OnBeginDrag(PointerEventData eventData)
         {
-            _onClick = onClick;
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left)
+                return;
+
+            if (_sourceCorpseId == 0 || _instanceId.Length == 0)
+                return;
+
+            // Publish loot drag payload for existing inventory drop targets.
+            UIInventoryDragContext.BeginLootEntryDrag(_sourceCorpseId, _instanceId.ToString(), _itemDefId);
+
+            if (UIDragGhost.Instance != null)
+                UIDragGhost.Instance.Show(_icon);
+
+            _prevBlocksRaycasts = _canvasGroup.blocksRaycasts;
+            _canvasGroup.blocksRaycasts = false;
+
+            _prevAlpha = _canvasGroup.alpha;
+            _canvasGroup.alpha = 0.35f;
+        }
+
+        public void OnDrag(PointerEventData eventData)
+        {
+            // Drag ghost follows pointer in UIDragGhost.Update().
+        }
+
+        public void OnEndDrag(PointerEventData eventData)
+        {
+            if (_canvasGroup != null)
+            {
+                _canvasGroup.blocksRaycasts = _prevBlocksRaycasts;
+                _canvasGroup.alpha = _prevAlpha;
+            }
+
+            if (UIDragGhost.Instance != null)
+                UIDragGhost.Instance.Hide();
+
+            UIInventoryDragContext.Clear();
         }
     }
 }

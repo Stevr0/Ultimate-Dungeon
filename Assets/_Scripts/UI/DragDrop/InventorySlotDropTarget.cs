@@ -1,23 +1,21 @@
 // ============================================================================
-// InventorySlotDropTarget.cs (UI) — v2
+// InventorySlotDropTarget.cs (UI) - v3
 // ----------------------------------------------------------------------------
 // Purpose:
 // - Accept drops onto an inventory slot.
 // - Supports:
-//   1) Inventory -> Inventory (move or swap into the *exact* target slot)
-//   2) Equipment -> Inventory (unequip into the *exact* target slot)
+//   1) Inventory -> Inventory (move or swap into the exact target slot)
+//   2) Equipment -> Inventory (unequip into the exact target slot)
+//   3) Corpse loot -> Inventory (request server-authoritative take)
 //
-// Design Notes:
-// - Inventory->Inventory uses move/swap.
-// - Equipment->Inventory is intentionally conservative:
-//     - We REQUIRE the target slot to be empty (server-enforced).
-//     - This avoids illegal swaps (e.g., swapping a random inventory item into
-//       an equipment slot that it can't legally occupy).
-//
-// Setup:
-// - Add this component to the same GameObject as InventorySlotViewUI.
+// Corpse loot flow:
+// - We DO NOT move the item locally.
+// - On valid drop, we call CorpseLootInteractable.RequestTakeItemServerRpc(instanceId).
+// - Inventory/corpse UI then refreshes from replicated/server snapshot state.
 // ============================================================================
 
+using Unity.Collections;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
@@ -38,6 +36,15 @@ namespace UltimateDungeon.UI
         {
             if (_view == null)
                 return;
+
+            // ----------------------------------------------------------------
+            // Corpse Loot -> Inventory (request take, no local move)
+            // ----------------------------------------------------------------
+            if (UIInventoryDragContext.Kind == UIInventoryDragContext.DragKind.LootEntry)
+            {
+                TryRequestLootTake();
+                return;
+            }
 
             // ----------------------------------------------------------------
             // Inventory -> Inventory (move/swap)
@@ -85,6 +92,25 @@ namespace UltimateDungeon.UI
                 equip.RequestUnequipToInventory(equipSlot, _view.SlotIndex);
                 return;
             }
+        }
+
+        private static void TryRequestLootTake()
+        {
+            if (NetworkManager.Singleton == null || NetworkManager.Singleton.SpawnManager == null)
+                return;
+
+            ulong corpseNetId = UIInventoryDragContext.SourceCorpseNetId;
+            string instance = UIInventoryDragContext.SourceLootInstanceId;
+            if (corpseNetId == 0 || string.IsNullOrWhiteSpace(instance))
+                return;
+
+            if (!NetworkManager.Singleton.SpawnManager.SpawnedObjects.TryGetValue(corpseNetId, out var corpseObj) || corpseObj == null)
+                return;
+
+            if (!corpseObj.TryGetComponent(out CorpseLootInteractable corpse))
+                return;
+
+            corpse.RequestTakeItemServerRpc(new FixedString64Bytes(instance));
         }
     }
 }
