@@ -1,3 +1,28 @@
+// ============================================================================
+// AttackLoop.cs — Ultimate Dungeon
+// ----------------------------------------------------------------------------
+// CHANGE (2026-02-12): Melee swing animation trigger.
+//
+// Goal:
+// - When the server schedules a melee swing, also trigger a client-visible
+//   animation on the attacker.
+//
+// Why this is safe:
+// - Combat remains server-authoritative.
+// - Animation is VISUAL ONLY (does not change combat outcome).
+// - We use NetworkAnimator so the SERVER triggers once and all clients see it.
+//
+// Setup checklist (Unity):
+// 1) On the Player prefab, ensure there is a NetworkAnimator component.
+// 2) In the Animator Controller:
+//    - Add a Trigger parameter: "meleeSwing" (or rename in inspector).
+//    - Add an Attack state/clip and transition into it on the trigger.
+//
+// Notes:
+// - This is intentionally generic: later you can swap the trigger name based
+//   on weapon type (sword vs mace vs unarmed), or drive it from ItemDef.
+// ============================================================================
+
 using System;
 using System.Collections;
 using UnityEngine;
@@ -27,7 +52,25 @@ namespace UltimateDungeon.Combat
         private ICombatActor _attacker;
         private ICombatActor _target;
 
+        [Header("Melee")]
         [SerializeField] private float _maxRangeMeters = 2.25f;
+
+        [Header("Animation (Visual Only)")]
+        [Tooltip("If true, the server will trigger a melee swing animation when a swing is scheduled.")]
+        [SerializeField] private bool triggerMeleeSwingAnimation = true;
+
+        [Tooltip("Animator Trigger parameter name used for melee swings.")]
+        [SerializeField] private string meleeSwingTrigger = "meleeSwing";
+
+        [Tooltip("If true, the attacker will rotate to face the target when scheduling a swing.")]
+        [SerializeField] private bool faceTargetOnSwing = true;
+
+        [Tooltip("Rotation speed (degrees/sec) when facing the target.")]
+        [SerializeField] private float faceTargetTurnSpeed = 720f;
+
+        // NetworkAnimator lets the server set animator triggers and have them replicate.
+        // This avoids writing our own ClientRPC just for animation.
+        private NetworkAnimator _networkAnimator;
 
         private Coroutine _loopRoutine;
 
@@ -48,6 +91,16 @@ namespace UltimateDungeon.Combat
             _attacker = GetComponent<ICombatActor>();
             if (_attacker == null)
                 Debug.LogError($"[AttackLoop] No ICombatActor found on '{name}'. Add CombatActorFacade.");
+
+            // Optional: only required if we want swing animation replication.
+            _networkAnimator = GetComponent<NetworkAnimator>();
+
+            if (triggerMeleeSwingAnimation && _networkAnimator == null)
+            {
+                Debug.LogWarning(
+                    $"[AttackLoop] triggerMeleeSwingAnimation is enabled but no NetworkAnimator exists on '{name}'. " +
+                    "Add NetworkAnimator to replicate swing triggers to clients.");
+            }
         }
 
         public override void OnNetworkDespawn()
@@ -165,6 +218,20 @@ namespace UltimateDungeon.Combat
                 // Determine swing time.
                 float swingTime = Mathf.Max(0.1f, _attacker.GetBaseSwingTimeSeconds());
 
+                // ----------------------------------------------------------------
+                // VISUAL: trigger the melee swing animation when we START the swing.
+                // ----------------------------------------------------------------
+                // IMPORTANT:
+                // - We trigger BEFORE the swingTime wait, so the animation starts
+                //   immediately, then the hit/miss resolves after swingTime.
+                // - This keeps the visual timing aligned with combat resolution.
+                TriggerMeleeSwingAnimationServer();
+
+                // Optional: face the target at swing start.
+                // (This is purely cosmetic; do not make gameplay depend on it.)
+                if (faceTargetOnSwing)
+                    FaceTargetServer(_target.Transform.position);
+
                 // Wait for swing completion.
                 yield return new WaitForSeconds(swingTime);
 
@@ -200,6 +267,47 @@ namespace UltimateDungeon.Combat
             _target = null;
 
             OnLoopStoppedServer?.Invoke();
+        }
+
+        // --------------------------------------------------------------------
+        // Animation helpers (Server)
+        // --------------------------------------------------------------------
+
+        private void TriggerMeleeSwingAnimationServer()
+        {
+            if (!IsServer)
+                return;
+
+            if (!triggerMeleeSwingAnimation)
+                return;
+
+            // NetworkAnimator is optional, but without it you won't see the trigger
+            // replicate to other clients.
+            if (_networkAnimator == null)
+                return;
+
+            // NetworkAnimator.SetTrigger will replicate the trigger to clients.
+            // Make sure your Animator Controller has a Trigger parameter that
+            // matches meleeSwingTrigger.
+            _networkAnimator.SetTrigger(meleeSwingTrigger);
+        }
+
+        private void FaceTargetServer(Vector3 worldTargetPos)
+        {
+            if (_attacker == null)
+                return;
+
+            Transform t = _attacker.Transform;
+            Vector3 to = worldTargetPos - t.position;
+            to.y = 0f;
+            if (to.sqrMagnitude < 0.0001f)
+                return;
+
+            Quaternion targetRot = Quaternion.LookRotation(to.normalized, Vector3.up);
+
+            // Use RotateTowards for deterministic-ish, stable behavior.
+            // (We are using Time.deltaTime on the server here; it is cosmetic only.)
+            t.rotation = Quaternion.RotateTowards(t.rotation, targetRot, faceTargetTurnSpeed * Time.deltaTime);
         }
     }
 }
