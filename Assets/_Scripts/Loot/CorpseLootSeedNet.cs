@@ -21,6 +21,9 @@ using Unity.Collections;
 [RequireComponent(typeof(NetworkObject))]
 public sealed class CorpseLootSeedNet : NetworkBehaviour
 {
+    // Static guard so seed handoff logging can be enabled quickly without noisy always-on logs.
+    private const bool DebugSeedLogs = false;
+
     /// <summary>
     /// Death-derived loot seed replicated to everyone (read-only on clients).
     ///
@@ -70,6 +73,9 @@ public sealed class CorpseLootSeedNet : NetworkBehaviour
 
         LootSeed.Value = seed;
         _hasServerAssignedSeed = true;
+
+        if (DebugSeedLogs)
+            Debug.Log($"[CorpseLootSeedNet][SeedTrace] corpseSeedAssigned seed={seed} netObjectId={NetworkObjectId}");
     }
 
     /// <summary>
@@ -87,5 +93,8 @@ public sealed class CorpseLootSeedNet : NetworkBehaviour
         string normalizedId = string.IsNullOrWhiteSpace(id) ? string.Empty : id.Trim();
         LootTableId.Value = normalizedId;
         _hasServerAssignedLootTableId = !string.IsNullOrEmpty(normalizedId);
+
+        if (DebugSeedLogs)
+            Debug.Log($"[CorpseLootSeedNet][SeedTrace] lootTableAssigned id={normalizedId} netObjectId={NetworkObjectId}");
     }
 }

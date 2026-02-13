@@ -1,4 +1,5 @@
 using System;
+using UltimateDungeon.Progression;
 using UnityEngine;
 
 namespace UltimateDungeon.Items
@@ -26,6 +27,22 @@ namespace UltimateDungeon.Items
     public static class AffixRoller
     {
         /// <summary>
+        /// Deterministic magnitude roll sourced from a seed. This is the preferred
+        /// server-authoritative entry point for loot generation.
+        /// </summary>
+        public static float RollMagnitude(AffixDef def, uint seed, string itemDefId = null, bool debugLogs = false)
+        {
+            var rng = new DeterministicRng(unchecked((int)seed));
+
+            if (debugLogs)
+            {
+                Debug.Log($"[AffixRoller][SeedTrace] itemDefId={itemDefId ?? "(unknown)"} seed={seed}");
+            }
+
+            return RollMagnitude(def, ref rng);
+        }
+
+        /// <summary>
         /// Rolls a magnitude for the given affix definition.
         ///
         /// Returns:
@@ -37,10 +54,9 @@ namespace UltimateDungeon.Items
         /// - If integerMagnitude is true, round to nearest int
         /// - Uses inclusive range semantics for integer rolls (common RPG expectation)
         /// </summary>
-        public static float RollMagnitude(AffixDef def, System.Random rng)
+        private static float RollMagnitude(AffixDef def, ref DeterministicRng rng)
         {
             if (def == null) throw new ArgumentNullException(nameof(def));
-            if (rng == null) throw new ArgumentNullException(nameof(rng));
 
             float min = Mathf.Max(0f, def.min);
             float max = Mathf.Max(0f, def.max);
@@ -64,14 +80,14 @@ namespace UltimateDungeon.Items
                     imax = imin;
 
                 // System.Random.Next(maxExclusive) -> so use (imax + 1) for inclusive.
-                int rolled = rng.Next(imin, imax + 1);
+                int rolled = rng.NextInt(imin, imax + 1);
                 value = rolled;
             }
             else
             {
                 // Float roll: [min..max)
                 // (We can treat it as inclusive enough for continuous values.)
-                double t = rng.NextDouble(); // 0..1
+                float t = rng.NextFloat01(); // 0..1
                 value = (float)(min + (max - min) * t);
 
                 // Optionally, you could quantize if you later want 0.1 steps, etc.
@@ -90,14 +106,51 @@ namespace UltimateDungeon.Items
         /// - An AffixCatalog for lookup
         /// - A seeded RNG for determinism
         /// </summary>
+        public static AffixInstance RollAffix(AffixCatalog catalog, AffixId id, uint seed, string itemDefId = null, bool debugLogs = false)
+        {
+            if (catalog == null) throw new ArgumentNullException(nameof(catalog));
+
+            var def = catalog.GetOrThrow(id);
+            float mag = RollMagnitude(def, seed, itemDefId, debugLogs);
+
+            return new AffixInstance(id, mag);
+        }
+
+        /// <summary>
+        /// Backward-compatible overload retained for non-loot callsites that already
+        /// hold a seeded System.Random stream.
+        /// </summary>
         public static AffixInstance RollAffix(AffixCatalog catalog, AffixId id, System.Random rng)
         {
             if (catalog == null) throw new ArgumentNullException(nameof(catalog));
             if (rng == null) throw new ArgumentNullException(nameof(rng));
 
             var def = catalog.GetOrThrow(id);
-            float mag = RollMagnitude(def, rng);
+            float min = Mathf.Max(0f, def.min);
+            float max = Mathf.Max(0f, def.max);
 
+            if (max < min)
+                max = min;
+
+            float mag;
+            if (Mathf.Approximately(min, max))
+            {
+                mag = def.integerMagnitude ? Mathf.Round(min) : min;
+            }
+            else if (def.integerMagnitude)
+            {
+                int imin = Mathf.CeilToInt(min);
+                int imax = Mathf.FloorToInt(max);
+                if (imax < imin)
+                    imax = imin;
+                mag = rng.Next(imin, imax + 1);
+            }
+            else
+            {
+                mag = (float)(min + (max - min) * rng.NextDouble());
+            }
+
+            mag = def.Clamp(mag);
             return new AffixInstance(id, mag);
         }
 
