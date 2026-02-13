@@ -205,7 +205,7 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
                 for (int i = 0; i < outputs.Count; i++)
                 {
                     var output = outputs[i];
-                    int quantity = Mathf.Max(0, output.quantity);
+                    int quantity = Mathf.Max(0, output.Quantity);
 
                     // We intentionally create one instance per quantity unit.
                     // This is the safest compatibility choice because it preserves
@@ -216,7 +216,7 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
                         uint itemSeed = baseSeed + (uint)createdIndex * 1013904223u;
                         createdIndex++;
 
-                        if (!itemInstanceFactory.TryCreateLootItem(output.itemId, itemSeed, out var item) || item == null)
+                        if (!itemInstanceFactory.TryCreateLootItem(output.ItemId, itemSeed, out var item) || item == null)
                             continue;
 
                         item.EnsureInstanceId();
