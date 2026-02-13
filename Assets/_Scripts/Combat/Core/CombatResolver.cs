@@ -264,6 +264,33 @@ namespace UltimateDungeon.Combat
                     victim.Transform.rotation
                 );
 
+                // Build a deterministic corpse-loot seed from death context instead of
+                // from the corpse's own NetworkObjectId.
+                //
+                // Inputs:
+                // - victim net id      : ties loot to the victim that died
+                // - killer net id      : ties loot to who caused the death (0 if unknown)
+                // - swing sequence     : deterministic event sequence already used by combat
+                //
+                // This keeps loot deterministic while removing dependence on spawn ordering.
+                ulong killerNetId = killer != null ? killer.NetId : 0ul;
+                int lootSeedInt = UltimateDungeon.Progression.DeterministicRng.CombineSeed(
+                    unchecked((int)victimNetId),
+                    unchecked((int)killerNetId),
+                    _swingSequence);
+                uint lootSeed = unchecked((uint)lootSeedInt);
+
+                if (corpse.TryGetComponent(out CorpseLootSeedNet corpseLootSeedNet))
+                {
+                    // IMPORTANT: set seed immediately after Instantiate and before Spawn,
+                    // so server OnNetworkSpawn consumers can use it right away.
+                    corpseLootSeedNet.SetSeed(lootSeed);
+                }
+                else
+                {
+                    Debug.LogWarning("[CombatResolver] Spawned corpse is missing CorpseLootSeedNet. Loot will use fallback seeding.");
+                }
+
                 var corpseNetObj = corpse.GetComponent<NetworkObject>();
                 if (corpseNetObj != null)
                     corpseNetObj.Spawn();
