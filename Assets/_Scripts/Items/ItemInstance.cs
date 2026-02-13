@@ -42,6 +42,16 @@ namespace UltimateDungeon.Items
         /// </summary>
         public string instanceId;
 
+        /// <summary>
+        /// Deterministic seed used to roll this specific item's randomized properties.
+        ///
+        /// IMPORTANT:
+        /// - Assigned only by authoritative server-side creation pipeline.
+        /// - Persisted on the instance so UI/debugging can always inspect what seed
+        ///   generated the currently stored affix/stat results.
+        /// </summary>
+        public uint rollSeed;
+
         // --------------------------------------------------------------------
         // Stack state
         // --------------------------------------------------------------------
@@ -138,6 +148,7 @@ namespace UltimateDungeon.Items
 
             itemDefId = def.itemDefId;
             EnsureInstanceId();
+            rollSeed = 0u;
 
             // Stack state
             stackCount = 1;
@@ -348,6 +359,7 @@ namespace UltimateDungeon.Items
             return new ItemInstance
             {
                 itemDefId = itemDefId,
+                rollSeed = rollSeed,
                 stackCount = stackCount,
                 durabilityCurrent = durabilityCurrent,
                 durabilityMax = durabilityMax,

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UltimateDungeon.Progression;
 using UnityEngine;
 
 namespace UltimateDungeon.Items
@@ -30,6 +31,7 @@ namespace UltimateDungeon.Items
         [Header("Loot (Placeholder)")]
         [Tooltip("Temporary rarity used for loot affix count until a real loot system exists.")]
         [SerializeField] private LootRarity lootRarity = LootRarity.Uncommon;
+        [SerializeField] private bool debugLogs;
 
         private Dictionary<string, AffixPool> _poolByName;
 
@@ -82,10 +84,17 @@ namespace UltimateDungeon.Items
 
             instance = new ItemInstance();
             instance.InitFromDef(def);
+            instance.rollSeed = seed;
+            instance.EnsureInstanceId();
+
+            if (debugLogs)
+            {
+                Debug.Log($"[ItemInstanceFactory][SeedTrace] itemDefId={itemDefId} seed={seed} instanceId={instance.instanceId}");
+            }
 
             if (!CanRollAffixes(def))
             {
-                LogLootResult(instance, Array.Empty<AffixInstance>());
+                LogLootResult(instance, instance.rollSeed, Array.Empty<AffixInstance>());
                 return true;
             }
 
@@ -94,24 +103,24 @@ namespace UltimateDungeon.Items
 
             if (desiredCount <= 0)
             {
-                LogLootResult(instance, Array.Empty<AffixInstance>());
+                LogLootResult(instance, instance.rollSeed, Array.Empty<AffixInstance>());
                 return true;
             }
 
             var pools = ResolvePools(def.affixPoolRefs);
             if (pools.Count == 0)
             {
-                LogLootResult(instance, Array.Empty<AffixInstance>());
+                LogLootResult(instance, instance.rollSeed, Array.Empty<AffixInstance>());
                 return true;
             }
 
-            var rolledAffixes = RollAffixes(def, pools, desiredCount, rng);
+            var rolledAffixes = RollAffixes(def, pools, desiredCount, seed, rng);
             if (rolledAffixes.Count > 0)
             {
                 instance.affixes.AddRange(rolledAffixes);
             }
 
-            LogLootResult(instance, rolledAffixes);
+            LogLootResult(instance, instance.rollSeed, rolledAffixes);
             return true;
         }
 
@@ -149,12 +158,13 @@ namespace UltimateDungeon.Items
             return pools;
         }
 
-        private List<AffixInstance> RollAffixes(ItemDef def, List<AffixPool> pools, int desiredCount, System.Random rng)
+        private List<AffixInstance> RollAffixes(ItemDef def, List<AffixPool> pools, int desiredCount, uint itemSeed, System.Random selectionRng)
         {
             var result = new List<AffixInstance>(desiredCount);
             var used = new HashSet<AffixId>();
             var fallbackEligibility = ResolveEligibility(def);
             int remaining = desiredCount;
+            int rollIndex = 0;
 
             for (int i = 0; i < pools.Count; i++)
             {
@@ -166,14 +176,22 @@ namespace UltimateDungeon.Items
                     ? pool.intendedEligibility
                     : fallbackEligibility;
 
-                var rolled = AffixPicker.PickAndRoll(affixCatalog, pool, remaining, requiredEligibility, rng);
-                for (int j = 0; j < rolled.Count && remaining > 0; j++)
+                var pickedIds = AffixPicker.PickIds(affixCatalog, pool, remaining, requiredEligibility, selectionRng);
+                for (int j = 0; j < pickedIds.Count && remaining > 0; j++)
                 {
-                    if (used.Add(rolled[j].id))
-                    {
-                        result.Add(rolled[j]);
-                        remaining--;
-                    }
+                    if (!used.Add(pickedIds[j]))
+                        continue;
+
+                    // IMPORTANT seed plumbing:
+                    // each affix roll consumes a deterministic sub-seed derived from the
+                    // per-item seed + roll index, so magnitude rolls cannot accidentally
+                    // drift onto any global/shared RNG stream.
+                    uint affixSeed = DeterministicMix(itemSeed, (uint)rollIndex);
+                    var rolledAffix = AffixRoller.RollAffix(affixCatalog, pickedIds[j], affixSeed, def.itemDefId, debugLogs);
+                    result.Add(rolledAffix);
+
+                    rollIndex++;
+                    remaining--;
                 }
             }
 
@@ -231,13 +249,29 @@ namespace UltimateDungeon.Items
             return eligibility;
         }
 
-        private static void LogLootResult(ItemInstance instance, IReadOnlyList<AffixInstance> affixes)
+
+        private static uint DeterministicMix(uint a, uint b)
+        {
+            unchecked
+            {
+                uint x = a ^ 0x9E3779B9u;
+                x ^= b + 0x85EBCA6Bu + (x << 6) + (x >> 2);
+                x ^= x >> 16;
+                x *= 0x7FEB352Du;
+                x ^= x >> 15;
+                x *= 0x846CA68Bu;
+                x ^= x >> 16;
+                return x;
+            }
+        }
+
+        private static void LogLootResult(ItemInstance instance, uint seed, IReadOnlyList<AffixInstance> affixes)
         {
             string affixList = affixes == null || affixes.Count == 0
                 ? "(none)"
                 : string.Join(", ", GetAffixIds(affixes));
 
-            Debug.Log($"[ItemInstanceFactory] Spawned loot '{instance.itemDefId}' | affixes={instance.AffixCount} | ids={affixList}");
+            Debug.Log($"[ItemInstanceFactory] Spawned loot '{instance.itemDefId}' | seed={seed} | affixes={instance.AffixCount} | ids={affixList}");
         }
 
         private static IEnumerable<string> GetAffixIds(IReadOnlyList<AffixInstance> affixes)

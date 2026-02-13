@@ -227,11 +227,21 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         int clampedMax = Mathf.Max(clampedMin, maxDrops);
         int dropCount = RangeInclusive(rng, clampedMin, clampedMax);
 
+        if (debugLogs)
+        {
+            Debug.Log($"[CorpseLootInteractable][SeedTrace] corpseNetworkObjectId={NetworkObject.NetworkObjectId} resolvedBaseSeed={baseSeed} dropTable={(dropTable != null ? dropTable.name : "(none)")} dropCount={dropCount}");
+        }
+
         // Resolve effective drop table with backward-compatible precedence:
         // 1) Monster-driven loot table id from CorpseLootSeedNet (if non-empty and valid)
         // 2) Serialized corpse dropTable reference (existing Step 2 behavior)
         // 3) Legacy loot-pool path below
         DropTableDef resolvedDropTable = ResolveDropTableServer();
+        if (debugLogs)
+        {
+            Debug.Log($"[CorpseLootInteractable][SeedTrace] corpseNetworkObjectId={NetworkObject.NetworkObjectId} effectiveDropTable={(resolvedDropTable != null ? resolvedDropTable.name : "(legacy-pool)")}");
+        }
+
         if (resolvedDropTable != null)
         {
             var outputs = DropTableResolver.Roll(resolvedDropTable, baseSeed, baseRolls: dropCount, skillValue: float.PositiveInfinity);
@@ -250,7 +260,13 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
                     // between item defs or runtime consumers.
                     for (int q = 0; q < quantity; q++)
                     {
-                        uint itemSeed = baseSeed + (uint)createdIndex * 1013904223u;
+                        uint itemSeed = DeterministicMix(baseSeed, (uint)createdIndex);
+
+                        if (debugLogs)
+                        {
+                            Debug.Log($"[CorpseLootInteractable][SeedTrace] corpseNetworkObjectId={NetworkObject.NetworkObjectId} createdIndex={createdIndex} itemDefId={output.ItemId} itemSeed={itemSeed}");
+                        }
+
                         createdIndex++;
 
                         if (!itemInstanceFactory.TryCreateLootItem(output.ItemId, itemSeed, out var item) || item == null)
@@ -265,6 +281,7 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
             if (debugLogs)
             {
                 Debug.Log($"[CorpseLootInteractable] SeedLootServer used dropTable path on corpse {NetworkObject.NetworkObjectId}. baseSeed={baseSeed}, dropRolls={dropCount}, generated={_loot.Count}.");
+                Debug.Log($"[LootSignature] corpse={NetworkObject.NetworkObjectId} sig={BuildLootSignature(baseSeed, _loot)}");
             }
 
             return;
@@ -286,7 +303,12 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         for (int i = 0; i < selectedItemDefIds.Count; i++)
         {
             string itemDefId = selectedItemDefIds[i];
-            uint itemSeed = baseSeed + (uint)i * 1013904223u;
+            uint itemSeed = DeterministicMix(baseSeed, (uint)i);
+            if (debugLogs)
+            {
+                Debug.Log($"[CorpseLootInteractable][SeedTrace] corpseNetworkObjectId={NetworkObject.NetworkObjectId} createdIndex={i} itemDefId={itemDefId} itemSeed={itemSeed}");
+            }
+
             if (!itemInstanceFactory.TryCreateLootItem(itemDefId, itemSeed, out var item) || item == null)
                 continue;
 
@@ -297,6 +319,7 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         if (debugLogs)
         {
             Debug.Log($"[CorpseLootInteractable] SeedLootServer used lootPool path on corpse {NetworkObject.NetworkObjectId}. baseSeed={baseSeed}, requestedDrops={dropCount}, selected={selectedItemDefIds.Count}, generated={_loot.Count}.");
+            Debug.Log($"[LootSignature] corpse={NetworkObject.NetworkObjectId} sig={BuildLootSignature(baseSeed, _loot)}");
         }
     }
 
@@ -468,6 +491,53 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
                 results.Add(pool[poolIndex]);
             }
         }
+    }
+
+
+    /// <summary>
+    /// Stable integer mixer used to derive per-item seeds from corpse base seed + item index.
+    ///
+    /// We intentionally avoid linear arithmetic (base + i * c) so adjacent indices do not
+    /// produce trivially correlated sequences when fed into downstream PRNGs.
+    /// </summary>
+    private static uint DeterministicMix(uint a, uint b)
+    {
+        unchecked
+        {
+            uint x = a ^ 0x9E3779B9u;
+            x ^= b + 0x85EBCA6Bu + (x << 6) + (x >> 2);
+            x ^= x >> 16;
+            x *= 0x7FEB352Du;
+            x ^= x >> 15;
+            x *= 0x846CA68Bu;
+            x ^= x >> 16;
+            return x;
+        }
+    }
+
+    /// <summary>
+    /// Compact signature for quick visual validation that corpse loot outcomes differ.
+    /// </summary>
+    private static string BuildLootSignature(uint baseSeed, List<ItemInstance> loot)
+    {
+        int count = loot?.Count ?? 0;
+        int previewCount = Mathf.Min(3, count);
+
+        var itemIds = new List<string>(previewCount);
+        var affixIds = new List<string>(previewCount);
+
+        for (int i = 0; i < previewCount; i++)
+        {
+            var item = loot[i];
+            itemIds.Add(string.IsNullOrWhiteSpace(item?.itemDefId) ? "(none)" : item.itemDefId);
+
+            if (item?.affixes != null && item.affixes.Count > 0)
+                affixIds.Add(item.affixes[0].id.ToString());
+            else
+                affixIds.Add("none");
+        }
+
+        return $"{baseSeed}:{count}:{string.Join(",", itemIds)}:{string.Join(",", affixIds)}";
     }
 
 #if UNITY_EDITOR
