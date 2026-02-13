@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UltimateDungeon.Items;
+using UltimateDungeon.Loot;
 using UltimateDungeon.Progression;
 using UltimateDungeon.SceneRules;
 using Unity.Collections;
@@ -25,7 +26,11 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
     [SerializeField] private int minDrops = 1;
     [SerializeField] private int maxDrops = 3;
     [SerializeField] private List<string> lootPoolItemDefIds = new();
+    // Optional: when assigned, this corpse uses the DropTableResolver pipeline
+    // instead of legacy lootPoolItemDefIds random-pick behavior.
+    [SerializeField] private DropTableDef dropTable;
     [SerializeField] private string debugItemDefId = "mainhand_sword_shortsword";
+    [SerializeField] private bool debugLogs;
 
     private readonly List<ItemInstance> _loot = new();
 
@@ -172,6 +177,13 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
             return;
         }
 
+        // IMPORTANT deterministic seed behavior:
+        // 1) Preferred path (new): if the corpse was handed an explicit server seed
+        //    from combat death context, always use that so all loot generation is
+        //    deterministic across server-side callsites/replays.
+        // 2) Back-compat fallback (old): if that bridge is missing, continue using
+        //    NetworkObjectId-derived seed so previous behavior remains intact.
+        //    ResolveSeedContextServer already emits the warning for this fallback.
         uint baseSeed = _hasServerLootSeed
             ? _serverLootSeed
             : (uint)(NetworkObject.NetworkObjectId * 2654435761u) ^ 0xC0FFEEu;
@@ -181,6 +193,49 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         int clampedMax = Mathf.Max(clampedMin, maxDrops);
         int dropCount = RangeInclusive(rng, clampedMin, clampedMax);
 
+        // New behavior path: DropTableDef-driven roll resolution.
+        // If no table is assigned, we intentionally preserve the legacy pool path below.
+        if (dropTable != null)
+        {
+            var outputs = DropTableResolver.Roll(dropTable, baseSeed, baseRolls: dropCount, skillValue: float.PositiveInfinity);
+            int createdIndex = 0;
+
+            if (outputs != null)
+            {
+                for (int i = 0; i < outputs.Count; i++)
+                {
+                    var output = outputs[i];
+                    int quantity = Mathf.Max(0, output.quantity);
+
+                    // We intentionally create one instance per quantity unit.
+                    // This is the safest compatibility choice because it preserves
+                    // exact quantity semantics even if stackability rules differ
+                    // between item defs or runtime consumers.
+                    for (int q = 0; q < quantity; q++)
+                    {
+                        uint itemSeed = baseSeed + (uint)createdIndex * 1013904223u;
+                        createdIndex++;
+
+                        if (!itemInstanceFactory.TryCreateLootItem(output.itemId, itemSeed, out var item) || item == null)
+                            continue;
+
+                        item.EnsureInstanceId();
+                        _loot.Add(item);
+                    }
+                }
+            }
+
+            if (debugLogs)
+            {
+                Debug.Log($"[CorpseLootInteractable] SeedLootServer used dropTable path on corpse {NetworkObject.NetworkObjectId}. baseSeed={baseSeed}, dropRolls={dropCount}, generated={_loot.Count}.");
+            }
+
+            return;
+        }
+
+        // Legacy behavior path (backward compatibility):
+        // draw item def ids from lootPoolItemDefIds (or fallback debug item), then
+        // create one instance per selected item exactly as before.
         List<string> selectedItemDefIds = new(dropCount);
         if (lootPoolItemDefIds != null && lootPoolItemDefIds.Count > 0)
         {
@@ -200,6 +255,11 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
 
             item.EnsureInstanceId();
             _loot.Add(item);
+        }
+
+        if (debugLogs)
+        {
+            Debug.Log($"[CorpseLootInteractable] SeedLootServer used lootPool path on corpse {NetworkObject.NetworkObjectId}. baseSeed={baseSeed}, requestedDrops={dropCount}, selected={selectedItemDefIds.Count}, generated={_loot.Count}.");
         }
     }
 
