@@ -29,6 +29,12 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
 
     private readonly List<ItemInstance> _loot = new();
 
+    // Server-side seed resolved from death context (via CorpseLootSeedNet).
+    // We keep this cached so SeedLootServer can remain focused on loot generation
+    // while using the externally provided deterministic context.
+    private uint _serverLootSeed;
+    private bool _hasServerLootSeed;
+
     public string DisplayName => string.IsNullOrWhiteSpace(displayName) ? name : displayName;
     public float InteractRange => Mathf.Max(0.1f, interactRange);
     public ulong NetworkObjectId => NetworkObject.NetworkObjectId;
@@ -43,6 +49,7 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         if (!IsServer)
             return;
 
+        ResolveSeedContextServer();
         SeedLootServer();
     }
 
@@ -126,6 +133,35 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
             NetworkObject.Despawn(destroy: true);
     }
 
+    /// <summary>
+    /// Server-only seed resolution for corpse loot generation.
+    ///
+    /// Preferred path:
+    /// - Read deterministic death-context seed handed off by CombatResolver via
+    ///   CorpseLootSeedNet before corpse spawn.
+    ///
+    /// Fallback path:
+    /// - If no handoff is present, keep old behavior (seed from corpse NetworkObjectId)
+    ///   and warn so playtests continue instead of hard-failing.
+    /// </summary>
+    private void ResolveSeedContextServer()
+    {
+        _hasServerLootSeed = false;
+        _serverLootSeed = 0u;
+
+        if (TryGetComponent(out CorpseLootSeedNet corpseLootSeedNet) && corpseLootSeedNet.HasServerAssignedSeed)
+        {
+            _serverLootSeed = corpseLootSeedNet.LootSeed.Value;
+            _hasServerLootSeed = true;
+            return;
+        }
+
+        // Acceptance fallback: preserve previous seed behavior so existing playtests
+        // remain functional even when the corpse seed bridge is not wired yet.
+        _serverLootSeed = (uint)(NetworkObject.NetworkObjectId * 2654435761u) ^ 0xC0FFEEu;
+        Debug.LogWarning($"[CorpseLootInteractable] No death-context loot seed provided for corpse {NetworkObject.NetworkObjectId}. Falling back to corpse NetworkObjectId seeding.");
+    }
+
     private void SeedLootServer()
     {
         _loot.Clear();
@@ -136,7 +172,9 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
             return;
         }
 
-        uint baseSeed = (uint)(NetworkObject.NetworkObjectId * 2654435761u) ^ 0xC0FFEEu;
+        uint baseSeed = _hasServerLootSeed
+            ? _serverLootSeed
+            : (uint)(NetworkObject.NetworkObjectId * 2654435761u) ^ 0xC0FFEEu;
         var rng = new DeterministicRng(unchecked((int)baseSeed));
 
         int clampedMin = Mathf.Max(0, minDrops);
