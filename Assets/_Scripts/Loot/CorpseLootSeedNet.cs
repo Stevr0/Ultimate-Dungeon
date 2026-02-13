@@ -1,5 +1,6 @@
 using Unity.Netcode;
 using UnityEngine;
+using Unity.Collections;
 
 /// <summary>
 /// CorpseLootSeedNet
@@ -31,16 +32,30 @@ public sealed class CorpseLootSeedNet : NetworkBehaviour
         readPerm: NetworkVariableReadPermission.Everyone,
         writePerm: NetworkVariableWritePermission.Server);
 
+    /// <summary>
+    /// Optional death-context loot table identifier supplied by the victim/monster.
+    ///
+    /// Backward compatibility rule:
+    /// - Empty string means "no monster-driven override", so corpse-side logic should
+    ///   continue to use its serialized dropTable or legacy pool path.
+    /// </summary>
+    public NetworkVariable<FixedString64Bytes> LootTableId { get; } = new NetworkVariable<FixedString64Bytes>(
+        value: default,
+        readPerm: NetworkVariableReadPermission.Everyone,
+        writePerm: NetworkVariableWritePermission.Server);
+
     // Server-only marker indicating that CombatResolver explicitly provided a seed.
     // This lets CorpseLootInteractable distinguish "real seed value 0" from
     // "no seed was ever provided" during server-side fallback handling.
     private bool _hasServerAssignedSeed;
+    private bool _hasServerAssignedLootTableId;
 
     /// <summary>
     /// True only when the server explicitly assigned a seed through SetSeed.
     /// Consumers should use this when deciding whether to use fallback behavior.
     /// </summary>
     public bool HasServerAssignedSeed => _hasServerAssignedSeed;
+    public bool HasServerAssignedLootTableId => _hasServerAssignedLootTableId;
 
     /// <summary>
     /// Server-only assignment used during corpse instantiation, before Spawn().
@@ -55,5 +70,22 @@ public sealed class CorpseLootSeedNet : NetworkBehaviour
 
         LootSeed.Value = seed;
         _hasServerAssignedSeed = true;
+    }
+
+    /// <summary>
+    /// Server-only assignment for the optional monster-driven loot table id.
+    /// Must be called before corpse Spawn() so OnNetworkSpawn server logic can use it.
+    /// </summary>
+    public void SetLootTableId(string id)
+    {
+        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer)
+        {
+            Debug.LogWarning("[CorpseLootSeedNet] SetLootTableId called on non-server. Ignored.");
+            return;
+        }
+
+        string normalizedId = string.IsNullOrWhiteSpace(id) ? string.Empty : id.Trim();
+        LootTableId.Value = normalizedId;
+        _hasServerAssignedLootTableId = !string.IsNullOrEmpty(normalizedId);
     }
 }

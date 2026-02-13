@@ -167,6 +167,40 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         Debug.LogWarning($"[CorpseLootInteractable] No death-context loot seed provided for corpse {NetworkObject.NetworkObjectId}. Falling back to corpse NetworkObjectId seeding.");
     }
 
+    /// <summary>
+    /// Server-only drop table resolution with explicit backward compatibility rules.
+    ///
+    /// Resolution order:
+    /// 1) CorpseLootSeedNet.LootTableId when present and non-empty (monster-driven).
+    ///    - We resolve via Resources/DropTables/{id} for minimal integration cost.
+    ///    - Missing asset logs warning, then falls back.
+    /// 2) Serialized dropTable on this corpse (existing Step 2 behavior).
+    /// 3) Null => caller will use legacy lootPoolItemDefIds behavior.
+    /// </summary>
+    private DropTableDef ResolveDropTableServer()
+    {
+        if (TryGetComponent(out CorpseLootSeedNet corpseLootSeedNet) && corpseLootSeedNet.HasServerAssignedLootTableId)
+        {
+            string lootTableId = corpseLootSeedNet.LootTableId.Value.ToString();
+            if (!string.IsNullOrWhiteSpace(lootTableId))
+            {
+                string normalizedId = lootTableId.Trim();
+                DropTableDef tableFromId = Resources.Load<DropTableDef>($"DropTables/{normalizedId}");
+                if (tableFromId != null)
+                    return tableFromId;
+
+                Debug.LogWarning($"[CorpseLootInteractable] LootTableId '{normalizedId}' was provided but no DropTableDef exists at Resources/DropTables/{normalizedId}. Falling back to serialized dropTable/legacy lootPool.");
+            }
+        }
+
+        // Existing behavior continuation (Step 2): use serialized corpse table.
+        if (dropTable != null)
+            return dropTable;
+
+        // Null here intentionally preserves legacy pool path in SeedLootServer.
+        return null;
+    }
+
     private void SeedLootServer()
     {
         _loot.Clear();
@@ -193,11 +227,14 @@ public sealed class CorpseLootInteractable : NetworkBehaviour, IInteractable
         int clampedMax = Mathf.Max(clampedMin, maxDrops);
         int dropCount = RangeInclusive(rng, clampedMin, clampedMax);
 
-        // New behavior path: DropTableDef-driven roll resolution.
-        // If no table is assigned, we intentionally preserve the legacy pool path below.
-        if (dropTable != null)
+        // Resolve effective drop table with backward-compatible precedence:
+        // 1) Monster-driven loot table id from CorpseLootSeedNet (if non-empty and valid)
+        // 2) Serialized corpse dropTable reference (existing Step 2 behavior)
+        // 3) Legacy loot-pool path below
+        DropTableDef resolvedDropTable = ResolveDropTableServer();
+        if (resolvedDropTable != null)
         {
-            var outputs = DropTableResolver.Roll(dropTable, baseSeed, baseRolls: dropCount, skillValue: float.PositiveInfinity);
+            var outputs = DropTableResolver.Roll(resolvedDropTable, baseSeed, baseRolls: dropCount, skillValue: float.PositiveInfinity);
             int createdIndex = 0;
 
             if (outputs != null)
