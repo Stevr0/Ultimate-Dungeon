@@ -285,6 +285,13 @@ namespace UltimateDungeon.Combat
                     // IMPORTANT: set seed immediately after Instantiate and before Spawn,
                     // so server OnNetworkSpawn consumers can use it right away.
                     corpseLootSeedNet.SetSeed(lootSeed);
+
+                    // Monster-driven loot table handoff:
+                    // - We intentionally keep this tiny and non-invasive by reading a plain
+                    //   component value if present on the victim root.
+                    // - Empty/missing id is valid and means "use corpse defaults/fallbacks".
+                    string lootTableId = ResolveVictimLootTableId(victimNetObj.gameObject);
+                    corpseLootSeedNet.SetLootTableId(lootTableId);
                 }
                 else
                 {
@@ -309,6 +316,38 @@ namespace UltimateDungeon.Combat
         }
 
 
+
+        /// <summary>
+        /// Minimal provider contract for monster-driven corpse loot table selection.
+        ///
+        /// Any component on the victim that implements this interface can provide
+        /// a loot table id string without coupling CombatResolver to concrete types.
+        /// </summary>
+        public interface ILootTableProvider
+        {
+            string LootTableId { get; }
+        }
+
+        /// <summary>
+        /// Resolve an optional loot table id from victim components.
+        ///
+        /// Backward compatibility behavior:
+        /// - Missing provider => empty id => corpse keeps serialized dropTable/pool.
+        /// - Empty/whitespace provider value => same fallback behavior.
+        /// </summary>
+        private static string ResolveVictimLootTableId(GameObject victimRoot)
+        {
+            if (victimRoot == null)
+                return string.Empty;
+
+            var provider = victimRoot.GetComponent<ILootTableProvider>();
+            if (provider == null)
+                return string.Empty;
+
+            return string.IsNullOrWhiteSpace(provider.LootTableId)
+                ? string.Empty
+                : provider.LootTableId.Trim();
+        }
         private static IEnumerator DespawnAfterDelay(NetworkObject netObj, float delaySeconds)
         {
             if (delaySeconds > 0f)
