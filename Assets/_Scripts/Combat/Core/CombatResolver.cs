@@ -1,5 +1,26 @@
+// ============================================================================
+// CombatResolver.cs — Ultimate Dungeon
+// ----------------------------------------------------------------------------
+// Refactor Goals
+// - Keep gameplay behavior the same (v0.1 assumptions), but make the code:
+//   - easier to read
+//   - safer (single server gate)
+//   - easier to extend (clean helpers)
+// - Loot: use proper server RNG so each kill can yield unique loot.
+// - Preserve: corpse loot seed/table handoff via CorpseLootSeedNet.
+//
+// Notes
+// - This is still a STATIC resolver. It depends on NetworkManager.Singleton
+//   for coroutines (despawn delay).
+// - In a later iteration you may move coroutine scheduling to a dedicated
+//   server system (e.g., CombatSystem MonoBehaviour) so CombatResolver can be
+//   pure logic.
+// ============================================================================
+
 using System.Collections;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using UltimateDungeon.Loot;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -7,7 +28,7 @@ namespace UltimateDungeon.Combat
 {
     /// <summary>
     /// CombatResolver
-    /// --------------
+    /// ------------------------------------------------------------------------
     /// Server-only authority that resolves completed combat actions.
     ///
     /// DESIGN LAW:
@@ -15,30 +36,38 @@ namespace UltimateDungeon.Combat
     /// - It must only ever run on the server.
     ///
     /// v0.1 assumptions:
-    /// - Always hit
-    /// - Fixed damage per swing
-    /// - Simple death handling (despawn/destroy after a short delay)
+    /// - Hit chance is computed deterministically
+    /// - Damage roll is deterministic from the swing seed
+    /// - Death spawns a corpse and despawns the victim after a short delay
     ///
-    /// Disengage integration (COMBAT_DISENGAGE_RULES.md):
-    /// - On hostile resolution (Hit/Miss/DamagePacket), refresh combat for:
-    ///   - attacker
-    ///   - victim
-    ///
-    /// Note:
-    /// - Validated hostile intent refresh should happen at intent validation time
-    ///   (TargetIntentValidator / AttackLegalityResolver). We do NOT do that here.
+    /// Loot policy:
+    /// - Loot seed is server RNG (unique per kill).
+    /// - Everything downstream (drop tables, item instance creation, affixes)
+    ///   can remain deterministic FROM that loot seed.
     /// </summary>
     public static class CombatResolver
     {
-        // -------------------------
-        // v0.1 tuning constants
-        // -------------------------
+        // --------------------------------------------------------------------
+        // Tunables
+        // --------------------------------------------------------------------
 
         private const float DEATH_DESPAWN_DELAY_SECONDS = 0.35f;
 
+        // --------------------------------------------------------------------
+        // State
+        // --------------------------------------------------------------------
+
         // Tracks victims that have already triggered death handling.
+        // Prevents double-death from multiple packets in the same frame.
         private static readonly HashSet<ulong> _deadActors = new HashSet<ulong>();
+
+        // Deterministic sequence counter used for combat resolution ordering.
+        // (Not used for loot; loot uses true server RNG.)
         private static int _swingSequence;
+
+        // --------------------------------------------------------------------
+        // Public API
+        // --------------------------------------------------------------------
 
         /// <summary>
         /// Resolve a completed weapon swing.
@@ -46,78 +75,49 @@ namespace UltimateDungeon.Combat
         /// </summary>
         public static void ResolveSwing(ICombatActor attacker, ICombatActor target)
         {
-            // -------------------------
-            // Server safety
-            // -------------------------
-            if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer)
+            // Server-only safety gate.
+            if (!IsServerActive())
             {
                 Debug.LogWarning("[CombatResolver] ResolveSwing called on non-server. Ignored.");
                 return;
             }
 
-            // -------------------------
-            // Basic re-validation
-            // -------------------------
-            if (attacker == null || target == null)
+            // Basic re-validation.
+            if (!IsValidAttackContext(attacker, target))
                 return;
 
-            if (!attacker.IsAlive || !target.IsAlive)
-                return;
-
-            if (!attacker.CanAttack)
-                return;
-
-            // -------------------------
-            // Combat disengage refresh (HOSTILE RESOLUTION)
-            // -------------------------
-            // This swing timer completion counts as a hostile resolution attempt.
-            // Per COMBAT_DISENGAGE_RULES.md, BOTH attacker and victim refresh.
+            // Combat disengage refresh (HOSTILE RESOLUTION).
+            // This timer completion counts as a hostile resolution attempt.
             RefreshCombatBoth(attacker, target);
 
-            // -------------------------
-            // v0.1 Hit resolution
-            // -------------------------
-            int seed = UltimateDungeon.Progression.DeterministicRng.CombineSeed(
+            // Deterministic swing seed (combat should be deterministic).
+            int swingSeed = UltimateDungeon.Progression.DeterministicRng.CombineSeed(
                 unchecked((int)attacker.NetId),
                 unchecked((int)target.NetId),
                 ++_swingSequence);
-            var rng = new UltimateDungeon.Progression.DeterministicRng(seed);
 
-            float baseHitChance = 0.5f;
-            float hitChance = baseHitChance + attacker.GetAttackerHitChancePct() - target.GetDefenderDefenseChancePct();
-            hitChance = Mathf.Clamp(hitChance, 0.05f, 0.95f);
-            bool hit = rng.NextFloat01() <= hitChance;
+            var rng = new UltimateDungeon.Progression.DeterministicRng(swingSeed);
 
-            if (!hit)
-            {
-                // Even on miss, the hostile resolution already refreshed combat.
-                // You may optionally trigger miss feedback here later.
+            // Resolve hit/miss.
+            if (!RollHit(attacker, target, rng))
                 return;
-            }
 
-            // -------------------------
-            // Build DamagePacket (v0.1)
-            // -------------------------
-            int minDamage = Mathf.Max(0, attacker.GetWeaponMinDamage());
-            int maxDamage = Mathf.Max(minDamage, attacker.GetWeaponMaxDamage());
-            int baseDamage = rng.NextInt(minDamage, maxDamage + 1);
-
-            float damageIncrease = attacker.GetDamageIncreasePct();
-            int finalDamage = Mathf.Max(0, Mathf.RoundToInt(baseDamage * (1f + damageIncrease)));
+            // Roll damage.
+            int finalDamage = RollDamage(attacker, rng);
             DamageType damageType = attacker.GetWeaponDamageType();
 
+            // Build packet.
             DamagePacket packet = DamagePacket.CreateWeaponHit(
                 attacker.NetId,
                 target.NetId,
                 finalDamage,
                 damageType,
-                seed
-            );
+                swingSeed);
 
-            // Apply damage (server)
+            // Apply.
             ApplyDamagePacket(packet, attacker, target);
 
-            // Visual feedback hooks
+            // Optional visuals.
             TryTriggerHitFeedback(target, packet.finalDamageAmount);
         }
 
@@ -127,7 +127,7 @@ namespace UltimateDungeon.Combat
         /// </summary>
         public static void ResolveSpellDamage(ICombatActor caster, ICombatActor target, int finalDamage, DamageType type)
         {
-            if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer)
+            if (!IsServerActive())
             {
                 Debug.LogWarning("[CombatResolver] ResolveSpellDamage called on non-server. Ignored.");
                 return;
@@ -145,18 +145,83 @@ namespace UltimateDungeon.Combat
                 targetActorNetId = target.NetId,
                 finalDamageAmount = Mathf.Max(0, finalDamage),
                 damageType = type,
+
+                // Spells can have their own seed later if needed.
                 seed = 0,
                 tags = DamageTags.Spell
             };
 
             ApplyDamagePacket(packet, caster, target);
-
             TryTriggerHitFeedback(target, packet.finalDamageAmount);
         }
 
-        // -------------------------
-        // Disengage helpers
-        // -------------------------
+        /// <summary>
+        /// Debug helper: clears dead-actor cache so you can re-test in editor.
+        /// </summary>
+        public static void ResetForDebug()
+        {
+            _deadActors.Clear();
+        }
+
+        // --------------------------------------------------------------------
+        // Validation helpers
+        // --------------------------------------------------------------------
+
+        /// <summary>
+        /// True if we have a NetworkManager and it is running as a server.
+        /// </summary>
+        private static bool IsServerActive()
+        {
+            return NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer;
+        }
+
+        /// <summary>
+        /// Basic common validation for weapon swings.
+        /// </summary>
+        private static bool IsValidAttackContext(ICombatActor attacker, ICombatActor target)
+        {
+            if (attacker == null || target == null)
+                return false;
+
+            if (!attacker.IsAlive || !target.IsAlive)
+                return false;
+
+            if (!attacker.CanAttack)
+                return false;
+
+            return true;
+        }
+
+        // --------------------------------------------------------------------
+        // Combat resolution helpers
+        // --------------------------------------------------------------------
+
+        /// <summary>
+        /// Rolls hit using attacker/victim combat stats.
+        /// Uses deterministic RNG passed in.
+        /// </summary>
+        private static bool RollHit(ICombatActor attacker, ICombatActor target, UltimateDungeon.Progression.DeterministicRng rng)
+        {
+            float baseHitChance = 0.5f;
+            float hitChance = baseHitChance + attacker.GetAttackerHitChancePct() - target.GetDefenderDefenseChancePct();
+            hitChance = Mathf.Clamp(hitChance, 0.05f, 0.95f);
+            return rng.NextFloat01() <= hitChance;
+        }
+
+        /// <summary>
+        /// Rolls final damage from attacker weapon damage range and damage increase.
+        /// Uses deterministic RNG passed in.
+        /// </summary>
+        private static int RollDamage(ICombatActor attacker, UltimateDungeon.Progression.DeterministicRng rng)
+        {
+            int minDamage = Mathf.Max(0, attacker.GetWeaponMinDamage());
+            int maxDamage = Mathf.Max(minDamage, attacker.GetWeaponMaxDamage());
+            int baseDamage = rng.NextInt(minDamage, maxDamage + 1);
+
+            float damageIncrease = attacker.GetDamageIncreasePct();
+            int finalDamage = Mathf.Max(0, Mathf.RoundToInt(baseDamage * (1f + damageIncrease)));
+            return finalDamage;
+        }
 
         /// <summary>
         /// Refresh combat window for attacker and victim.
@@ -167,23 +232,22 @@ namespace UltimateDungeon.Combat
         /// </summary>
         private static void RefreshCombatBoth(ICombatActor attacker, ICombatActor victim)
         {
-            // Attacker refresh
+            // Attacker refresh.
             if (attacker.Transform != null && attacker.Transform.TryGetComponent(out CombatStateTracker atkTracker))
             {
-                // Prefer the new API if present.
                 atkTracker.ServerRefreshCombatWindow(victim.NetId);
             }
 
-            // Victim refresh
+            // Victim refresh.
             if (victim.Transform != null && victim.Transform.TryGetComponent(out CombatStateTracker vicTracker))
             {
                 vicTracker.ServerRefreshCombatWindow(attacker.NetId);
             }
         }
 
-        // -------------------------
+        // --------------------------------------------------------------------
         // Core damage application
-        // -------------------------
+        // --------------------------------------------------------------------
 
         /// <summary>
         /// Applies a DamagePacket to the target actor.
@@ -197,20 +261,21 @@ namespace UltimateDungeon.Combat
             if (target == null)
                 return;
 
+            // Gameplay-authoritative mutation happens here.
             target.ApplyDamageServer(packet.finalDamageAmount, packet.damageType, attacker);
 
+            // Death handling.
             if (!target.IsAlive)
-            {
                 TryTriggerDeath(victim: target, killer: attacker);
-            }
         }
 
-        // -------------------------
+        // --------------------------------------------------------------------
         // Hit feedback (optional)
-        // -------------------------
+        // --------------------------------------------------------------------
 
         private static void TryTriggerHitFeedback(ICombatActor target, int damageAmount)
         {
+            // We only know how to flash UI/visuals if the target is a Unity Component.
             if (!(target is Component targetComponent))
                 return;
 
@@ -225,16 +290,17 @@ namespace UltimateDungeon.Combat
             }
         }
 
-        // -------------------------
-        // Death handling (quick-fix)
-        // -------------------------
+        // --------------------------------------------------------------------
+        // Death handling (v0.1 / spike)
+        // --------------------------------------------------------------------
 
         private static void TryTriggerDeath(ICombatActor victim, ICombatActor killer)
         {
+            // Basic guards.
             if (victim == null)
                 return;
 
-            if (!NetworkManager.Singleton.IsServer)
+            if (!IsServerActive())
                 return;
 
             if (victim.IsAlive)
@@ -245,77 +311,92 @@ namespace UltimateDungeon.Combat
                 return;
 
             ulong victimNetId = victimNetObj.NetworkObjectId;
+
+            // Prevent double execution.
             if (_deadActors.Contains(victimNetId))
                 return;
 
             _deadActors.Add(victimNetId);
-
             Debug.Log($"[CombatResolver] Actor {victimNetId} died.");
 
-            // -------------------------
-            // SPAWN CORPSE (SPIKE)
-            // -------------------------
+            // Spawn corpse and hand off loot context (seed + optional loot table id).
+            SpawnCorpseAndHandoffLootContext(victimNetObj, victim, killer);
+
+            // Despawn victim after delay.
+            NetworkManager.Singleton.StartCoroutine(DespawnAfterDelay(victimNetObj, DEATH_DESPAWN_DELAY_SECONDS));
+        }
+
+        /// <summary>
+        /// Spawns PF_Corpse and hands off loot context via CorpseLootSeedNet.
+        ///
+        /// Loot seed policy:
+        /// - Uses true server RNG so each kill can produce unique loot.
+        /// - The seed is stored on the corpse and used by downstream deterministic systems
+        ///   (drop tables, item instance creation, affixes).
+        /// </summary>
+        private static void SpawnCorpseAndHandoffLootContext(NetworkObject victimNetObj, ICombatActor victim, ICombatActor killer)
+        {
             GameObject corpsePrefab = Resources.Load<GameObject>("PF_Corpse");
-            if (corpsePrefab != null)
+            if (corpsePrefab == null)
             {
-                GameObject corpse = Object.Instantiate(
-                    corpsePrefab,
-                    victim.Transform.position,
-                    victim.Transform.rotation
-                );
+                Debug.LogError("[CombatResolver] PF_Corpse not found in Resources.");
+                return;
+            }
 
-                // Build a deterministic corpse-loot seed from death context instead of
-                // from the corpse's own NetworkObjectId.
-                //
-                // Inputs:
-                // - victim net id      : ties loot to the victim that died
-                // - killer net id      : ties loot to who caused the death (0 if unknown)
-                // - swing sequence     : deterministic event sequence already used by combat
-                //
-                // This keeps loot deterministic while removing dependence on spawn ordering.
-                ulong killerNetId = killer != null ? killer.NetId : 0ul;
-                int lootSeedInt = UltimateDungeon.Progression.DeterministicRng.CombineSeed(
-                    unchecked((int)victimNetId),
-                    unchecked((int)killerNetId),
-                    _swingSequence);
-                uint lootSeed = unchecked((uint)lootSeedInt);
+            // Instantiate at the victim's current pose.
+            GameObject corpse = Object.Instantiate(
+                corpsePrefab,
+                victim.Transform.position,
+                victim.Transform.rotation);
 
-                if (corpse.TryGetComponent(out CorpseLootSeedNet corpseLootSeedNet))
-                {
-                    // IMPORTANT: set seed immediately after Instantiate and before Spawn,
-                    // so server OnNetworkSpawn consumers can use it right away.
-                    corpseLootSeedNet.SetSeed(lootSeed);
+            // "Proper RNG" seed: unique per death.
+            uint lootSeed = NextServerLootSeed();
 
-                    // Monster-driven loot table handoff:
-                    // - We intentionally keep this tiny and non-invasive by reading a plain
-                    //   component value if present on the victim root.
-                    // - Empty/missing id is valid and means "use corpse defaults/fallbacks".
-                    string lootTableId = ResolveVictimLootTableId(victimNetObj.gameObject);
-                    corpseLootSeedNet.SetLootTableId(lootTableId);
-                }
-                else
-                {
-                    Debug.LogWarning("[CombatResolver] Spawned corpse is missing CorpseLootSeedNet. Loot will use fallback seeding.");
-                }
+            // Optional monster-driven loot table id.
+            string lootTableId = ResolveVictimLootTableId(victimNetObj.gameObject);
 
-                var corpseNetObj = corpse.GetComponent<NetworkObject>();
-                if (corpseNetObj != null)
-                    corpseNetObj.Spawn();
+            // If the corpse has the seed component, hand off context.
+            if (corpse.TryGetComponent(out CorpseLootSeedNet corpseLootSeedNet))
+            {
+                // IMPORTANT:
+                // - Call these immediately after Instantiate and BEFORE Spawn().
+                // - CorpseLootSeedNet buffers pre-spawn and applies in OnNetworkSpawn.
+                corpseLootSeedNet.SetSeed(lootSeed);
+                corpseLootSeedNet.SetLootTableId(lootTableId);
             }
             else
             {
-                Debug.LogError("[CombatResolver] PF_Corpse not found in Resources.");
+                Debug.LogWarning("[CombatResolver] Spawned corpse is missing CorpseLootSeedNet. Loot will use fallback seeding.");
             }
 
-            // -------------------------
-            // DESPAWN MONSTER
-            // -------------------------
-            NetworkManager.Singleton.StartCoroutine(
-                DespawnAfterDelay(victimNetObj, DEATH_DESPAWN_DELAY_SECONDS)
-            );
+            // Finally network-spawn the corpse.
+            var corpseNetObj = corpse.GetComponent<NetworkObject>();
+            if (corpseNetObj != null)
+                corpseNetObj.Spawn();
         }
 
+        /// <summary>
+        /// Generates a server-authoritative random seed for loot.
+        ///
+        /// Why cryptographic RNG?
+        /// - Not dependent on frame timing.
+        /// - Harder to predict.
+        /// - Works well for "unique items every time".
+        ///
+        /// Trust model note:
+        /// - In Host mode, the host is the server (they can still cheat).
+        /// - Dedicated server later removes that trust issue.
+        /// </summary>
+        private static uint NextServerLootSeed()
+        {
+            byte[] bytes = new byte[4];
+            RandomNumberGenerator.Fill(bytes);
+            return System.BitConverter.ToUInt32(bytes, 0);
+        }
 
+        // --------------------------------------------------------------------
+        // Monster-driven loot table id handoff
+        // --------------------------------------------------------------------
 
         /// <summary>
         /// Minimal provider contract for monster-driven corpse loot table selection.
@@ -348,12 +429,17 @@ namespace UltimateDungeon.Combat
                 ? string.Empty
                 : provider.LootTableId.Trim();
         }
+
+        // --------------------------------------------------------------------
+        // Coroutines
+        // --------------------------------------------------------------------
+
         private static IEnumerator DespawnAfterDelay(NetworkObject netObj, float delaySeconds)
         {
             if (delaySeconds > 0f)
                 yield return new WaitForSeconds(delaySeconds);
 
-            if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer)
+            if (!IsServerActive())
                 yield break;
 
             if (netObj == null)
@@ -363,15 +449,6 @@ namespace UltimateDungeon.Combat
                 yield break;
 
             netObj.Despawn(destroy: true);
-        }
-
-        // -------------------------
-        // Debug helpers
-        // -------------------------
-
-        public static void ResetForDebug()
-        {
-            _deadActors.Clear();
         }
     }
 }
